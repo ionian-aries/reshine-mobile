@@ -1,19 +1,30 @@
 {
+  "apk": {
+    "image": "android-builder:5.24.2026081301-r6"
+  },
   "targets": {
     "online": {
       "uniapp": {
         "dir": "online"
       },
+      "apk": {
+        "inputDir": "config/online"
+      },
       "output": {
-        "wgtDir": "output/online/wgt"
+        "wgtDir": "output/online/wgt",
+        "apkDir": "output/online/apk"
       }
     },
     "local": {
       "uniapp": {
         "dir": "local"
       },
+      "apk": {
+        "inputDir": "config/local"
+      },
       "output": {
-        "wgtDir": "output/local/wgt"
+        "wgtDir": "output/local/wgt",
+        "apkDir": "output/local/apk"
       }
     }
   }

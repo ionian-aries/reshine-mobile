@@ -93,7 +93,8 @@ async function main() {
     await createWgt(target.appPlusDir, wgtPath);
     await validateWgt(target, wgtPath, manifest);
     console.log(`[build:wgt] ${name} 构建成功（${manifest.appId}，${manifest.versionName}，${manifest.versionCode}）`);
-    console.log(`WGT 文件：${path.join(target.relativeWgtDir, path.basename(wgtPath))}`);
+    console.log('WGT 文件:');
+    console.log(path.join(target.relativeWgtDir, path.basename(wgtPath)));
   } catch (error) {
     failure = normalizeError(error);
     try { await resetWgtDirectory(target); }

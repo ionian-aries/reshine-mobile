@@ -3,9 +3,10 @@ node_modules/
 unpackage/
 dist/
 
-# local env files
-.env.local
-.env.*.local
+# Frontend environment files: only examples are versioned
+.env
+.env.*
+!.env.example
 
 # Log files
 npm-debug.log*
@@ -25,6 +26,19 @@ yarn-error.log*
 # Android APK private build configuration and signing materials
 /config/*/config.json
 /config/*/secrets/
+/android-old/
+**/*.keystore
+**/*.jks
+**/*.p12
+**/*.pfx
+!/android-project/simpleDemo/test.jks
 
 # Android APK build outputs
 /output/
+
+# Android template generated state
+/android-project/.gradle/
+/android-project/**/build/
+/android-project/local.properties
+/android-project/.idea/
+/android-project/**/*.iml

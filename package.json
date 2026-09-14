@@ -8,6 +8,8 @@
     "init:uniapp": "node scripts/init-uniapp.js",
     "build:app-plus": "node scripts/build-app-plus.js",
     "build:wgt": "node scripts/build-wgt.js",
+    "build:image": "node scripts/build-image.js",
+    "build:apk": "node scripts/build-apk.js",
     "update:version": "node scripts/update-version.js",
     "test": "node --test"
   },

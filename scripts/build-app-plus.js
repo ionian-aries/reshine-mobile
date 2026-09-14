@@ -25,7 +25,8 @@ async function main() {
   console.log(`[build:app-plus] 正在构建 ${name} (${target.relativeDir})`);
   await buildAppPlus(target);
   console.log(`[build:app-plus] ${name} 构建成功`);
-  console.log(`App-plus 输出目录：${target.relativeAppPlusDir}`);
+  console.log('App-plus 输出目录');
+  console.log(target.relativeAppPlusDir);
 }
 
 main().catch((error) => { console.error(`[build:app-plus] 构建失败：${normalizeError(error).message}`); process.exitCode = 1; });

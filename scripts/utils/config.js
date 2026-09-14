@@ -54,7 +54,7 @@ export async function readBuildConfig() {
   if (!targets || typeof targets !== 'object' || Array.isArray(targets)) throw new Error('build.config.json 中未配置有效的 targets');
   const availableNames = Object.keys(targets);
   if (availableNames.length === 0) throw new Error('build.config.json 中未配置 targets');
-  return { targets, availableNames };
+  return { apk: config.apk, targets, availableNames };
 }
 
 export async function resolveUniappTarget(name, target) {

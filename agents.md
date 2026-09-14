@@ -30,8 +30,10 @@
 
 - online App ID：`__UNI__EF1708F`。
 - local App ID：`__UNI__526C783`。
-- HBuilderX Android 模板版本：`5.24.2026081301`。
-- 每个应用使用 `config/<project>` 作为 `/input:ro`，使用 `output/<project>` 作为 `/output`。
-- `config.json` 包含普通配置及敏感值，不提交 Git。
+- HBuilderX Android 模板版本：`5.24.2026081301`，模板保留官方 `simpleDemo` 模块和合法示例配置。
+- 容器脚本位于 `docker/`，不属于 `android-project/` 官方工程模板。
+- 每个应用使用 `config/<project>` 保存私有 Android 配置和签名材料；`build:apk` 生成一次性 `/input:ro` 快照，并将 `output/<project>/apk` 作为最终输出。
+- 每个应用的 `.env` 仅用于会编译进前端的公开地址配置；仓库只提交 `.env.example`，真实 `.env` 不提交，也不传入 Docker。
+- `config.json` 包含 Android 普通配置及敏感值，不提交 Git；App Key 和签名密码不得迁移到 `.env`。
 - keystore 固定保存在 `config/<project>/secrets/`，不提交 Git。
 - Docker 构建命令不通过 `-e` 传递 App Key 或签名参数。
