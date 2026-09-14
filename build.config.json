@@ -1,0 +1,20 @@
+{
+  "targets": {
+    "online": {
+      "uniapp": {
+        "dir": "online"
+      },
+      "output": {
+        "wgtDir": "output/online/wgt"
+      }
+    },
+    "local": {
+      "uniapp": {
+        "dir": "local"
+      },
+      "output": {
+        "wgtDir": "output/local/wgt"
+      }
+    }
+  }
+}
