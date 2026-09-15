@@ -1,49 +1,46 @@
 <template>
-	<view class="content">
-		<image class="logo" src="/static/logo.png"></image>
-		<view>
-			<text class="title">{{title}}</text>
-		</view>
-	</view>
+  <view class="page">
+    <web-view :src="webviewUrl" @message="handleMessage" @error="handleError"></web-view>
+  </view>
 </template>
 
 <script>
-	export default {
-		data() {
-			return {
-				title: 'online'
-			}
-		},
-		onLoad() {
+const configuredUrl = process.env.VUE_APP_WEBVIEW_URL
 
-		},
-		methods: {
+if (!configuredUrl) {
+  throw new Error('缺少 VUE_APP_WEBVIEW_URL，请配置 online/.env')
+}
 
-		}
-	}
+let parsedUrl
+try {
+  parsedUrl = new URL(configuredUrl)
+} catch (error) {
+  throw new Error('VUE_APP_WEBVIEW_URL 必须是有效绝对 URL')
+}
+if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+  throw new Error('VUE_APP_WEBVIEW_URL 只允许 HTTP(S) URL')
+}
+
+export default {
+  data() {
+    return {
+      webviewUrl: parsedUrl.toString()
+    }
+  },
+  methods: {
+    handleMessage(event) {
+      this.$emit('webview-message', event.detail)
+    },
+    handleError() {
+      uni.showToast({ title: '在线页面加载失败', icon: 'none' })
+    }
+  }
+}
 </script>
 
 <style>
-	.content {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-	}
-
-	.logo {
-		height: 200rpx;
-		width: 200rpx;
-		margin: 200rpx auto 50rpx auto;
-	}
-
-	.text-area {
-		display: flex;
-		justify-content: center;
-	}
-
-	.title {
-		font-size: 36rpx;
-		color: #8f8f94;
-	}
+.page {
+  width: 100%;
+  height: 100%;
+}
 </style>

@@ -11,7 +11,7 @@
 后续任何涉及以下内容的代码、配置、脚本或方案变更，都必须在同一次工作中同步全量检查并更新 `Android-APK离线构建PRD.md`：
 
 - `online/` 或 `local/` 的应用定位、App ID、包名、版本、资源生成方式和发布流程；
-- `android/` 模板、原生模块、权限、Manifest、AAR/JAR、Gradle 或签名逻辑；
+- `android-project/` 模板、原生模块、权限、Manifest、AAR/JAR、Gradle 或签名逻辑；
 - `config/` 的目录结构、`config.json` 字段、`resources/`、`override/` 或 `secrets/` 约定；
 - Docker 镜像、入口脚本、挂载路径、构建命令、离线依赖和输出结构；
 - keystore、DCloud App Key、密码、Git 忽略和 Secret 交付规则；
@@ -33,6 +33,8 @@
 - HBuilderX Android 模板版本：`5.24.2026081301`，模板保留官方 `simpleDemo` 模块和合法示例配置。
 - 容器脚本位于 `docker/`，不属于 `android-project/` 官方工程模板。
 - 每个应用使用 `config/<project>` 保存私有 Android 配置和签名材料；`build:apk` 生成一次性 `/input:ro` 快照，并将 `output/<project>/apk` 作为最终输出。
+- Docker 镜像版本：`android-builder:5.24.2026081301-r6`。
+- `scripts/utils/` 只允许保存至少被两个不同业务脚本直接调用的公共函数；仅供单个脚本使用的逻辑必须留在该脚本中，测试引用不计入复用数量。
 - 每个应用的 `.env` 仅用于会编译进前端的公开地址配置；仓库只提交 `.env.example`，真实 `.env` 不提交，也不传入 Docker。
 - `config.json` 包含 Android 普通配置及敏感值，不提交 Git；App Key 和签名密码不得迁移到 `.env`。
 - keystore 固定保存在 `config/<project>/secrets/`，不提交 Git。

@@ -1,6 +1,6 @@
 {
   "apk": {
-    "image": "android-builder:5.24.2026081301-r6"
+    "image": "android-builder:5.24.2026081301-r1"
   },
   "targets": {
     "online": {
@@ -18,6 +18,10 @@
     "local": {
       "uniapp": {
         "dir": "local"
+      },
+      "localAssets": {
+        "sourceDir": "local/m",
+        "outputDir": "local/src/hybrid/html"
       },
       "apk": {
         "inputDir": "config/local"

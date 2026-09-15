@@ -1,94 +1,23 @@
 # Reshine Mobile 双应用 Android APK 离线构建产品需求文档
 
-## 1. 文档目标
+## 1. 目标与边界
 
-本文是 `reshine-mobile` 中 online、local 双应用管理，以及 Android APK Docker 离线构建的唯一现行基准。只记录当前有效方案。
+本文是 `reshine-mobile` 的现行实现基准。项目包含两个 UniApp：
 
-## 2. 应用与配置边界
-
-| 目标 | UniApp 工程 | App ID | 定位 |
+| 目标 | 目录 | App ID | 页面来源 |
 | --- | --- | --- | --- |
-| online | `online/` | `__UNI__EF1708F` | 在线应用 |
-| local | `local/` | `__UNI__526C783` | 本地应用 |
+| online | `online/` | `__UNI__EF1708F` | `<web-view>` 加载 `VUE_APP_WEBVIEW_URL` |
+| local | `local/` | `__UNI__526C783` | `<web-view>` 加载 APK 内 `hybrid/html/index.html` |
 
-两者共享官方 HBuilderX `5.24.2026081301` Android 工程和固定 Docker 镜像，独立管理 AppID、包名、版本、App Key、App-plus 资源、签名和 APK。
+local 只离线携带网页静态资源。认证、数据增删改查、上传、对象存储、服务端二维码等仍访问 `VUE_APP_LOCAL_API_BASE_URL` 指定的现场局域网后端；扫码、蓝牙、电子秤和打印依赖 UniApp/HTML5 Plus 原生桥及 Android 权限。
 
-### 2.1 `.env`
+Android Docker 镜像只把已生成的 App-plus 资源封装成 APK，不安装前端依赖、不构建 H5、不构建 UniApp 源码。
 
-- `online/.env`、`local/.env` 只保存会编译进前端的地址等非敏感配置。
-- 仓库只提交 `.env.example`，忽略 `.env` 及所有环境变体；开发人员按示例创建真实文件。
-- `.env` 中的值会进入前端制品，不能存放令牌、DCloud App Key、keystore 密码或其他 Secret。
-- `.env` 只由各 UniApp 子项目的前端构建读取，不复制到 APK 输入、不挂载进 Docker，也不参与 `build:image`。
-- 当前脚手架尚未消费这些地址变量；示例字段分别为 `VUE_APP_WEBVIEW_URL` 和 `VUE_APP_LOCAL_API_BASE_URL`，业务接入时必须在源码中显式读取。
+## 2. 配置分层
 
-### 2.2 Android 私有输入
+### 2.1 `build.config.json`
 
-Android 普通配置与敏感值继续保存在不提交 Git 的 `config/<target>/config.json`；keystore 位于 `config/<target>/secrets/`。Secret 不通过 Docker 环境变量或命令行参数传递。
-
-## 3. 目录规范
-
-```text
-reshine-mobile/
-├── online/
-│   └── .env.example
-├── local/
-│   └── .env.example
-├── android-project/                     # 官方 HBuilder-Integrate-AS 基线
-│   ├── build.gradle
-│   ├── settings.gradle                  # include ':simpleDemo'
-│   ├── gradle.properties
-│   ├── gradlew
-│   ├── gradle/wrapper/
-│   └── simpleDemo/                      # 保留官方模块名和合法示例配置
-├── docker/
-│   ├── entrypoint.sh                    # build:apk 容器入口
-│   ├── prepare-project.js               # 准备本次临时 Android 工程
-│   └── export-metadata.js               # 导出非敏感 APK 元数据
-├── scripts/
-│   ├── build-image.js
-│   ├── build-apk.js
-│   ├── build-app-plus.js
-│   ├── build-wgt.js
-│   ├── init-uniapp.js
-│   ├── update-version.js
-│   └── utils/
-├── config/
-│   ├── online/
-│   │   ├── config.json
-│   │   ├── override/
-│   │   └── secrets/<certificate>.keystore
-│   └── local/
-│       ├── config.json
-│       ├── override/
-│       └── secrets/<certificate>.keystore
-├── output/<target>/{apk,wgt}/
-├── Dockerfile
-├── build.config.json
-└── package.json
-```
-
-`resources/apps` 不再是长期私有输入。`build:apk` 每次使用本次 App-plus 输出创建系统临时输入快照，成功或失败后删除。
-
-## 4. Android 官方模板原则
-
-`android-project/` 复制自：
-
-```text
-/Users/zhuanghengheng/Works/8.31金川瑞翔-new/Android-SDK@5.24.82669_20260813/HBuilder-Integrate-AS
-```
-
-必须保留：
-
-- `simpleDemo` 模块名；
-- 官方 Gradle Wrapper、AGP、仓库、SDK 版本和 Maven 依赖；
-- 官方 AAR/JAR、JNI、资源、App-plus 示例和 `test.jks`；
-- 合法默认 namespace、applicationId、版本、AppID、应用名和测试签名。
-
-只允许加入项目确需的原生权限、组件、模块和依赖。不得将模板改成包含 `@APPLICATION_ID@` 等非法占位符的半成品，也不增加非必需的运行时 Gradle 配置层。业务配置仅修改容器内临时副本。
-
-新增原生模块、AAR/JAR、Maven 依赖、Manifest 组件或权限时，必须更新模板、镜像修订号和本文，并重新执行完整镜像与双应用验收。
-
-## 5. `build.config.json`
+根配置只描述能力和路径：
 
 ```json
 {
@@ -101,6 +30,10 @@ reshine-mobile/
     },
     "local": {
       "uniapp": { "dir": "local" },
+      "localAssets": {
+        "sourceDir": "local/m",
+        "outputDir": "local/src/hybrid/html"
+      },
       "apk": { "inputDir": "config/local" },
       "output": { "wgtDir": "output/local/wgt", "apkDir": "output/local/apk" }
     }
@@ -108,9 +41,18 @@ reshine-mobile/
 }
 ```
 
-`apk.image` 是 `build:image` 和 `build:apk` 的唯一镜像引用。模板、工具链、依赖或容器脚本变化时必须提高 `-r<revision>`，旧标签不得覆盖。
+只有配置了 `localAssets` 的目标会进入 `build:local-assets` 选择列表。显式传入不具备该能力的目标必须失败。
 
-## 6. 私有 `config.json`
+### 2.2 前端环境配置
+
+- `online/.env`：`VUE_APP_WEBVIEW_URL`，必须是 HTTP(S) 绝对地址。
+- `local/.env`：`VUE_APP_LOCAL_API_BASE_URL`，必须是无凭据、查询参数和片段的 HTTP(S) 绝对地址。
+- 仓库只提交 `.env.example`，真实 `.env` 不提交。
+- 这些值会编译进前端，不能保存 Token、DCloud App Key、签名密码等 Secret。
+
+### 2.3 Android 私有配置
+
+`config/<target>/config.json` 和 `config/<target>/secrets/` 不提交 Git。配置结构如下：
 
 ```json
 {
@@ -136,59 +78,130 @@ reshine-mobile/
 }
 ```
 
-要求：
+Gradle 使用 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword` 完成 release 签名；容器随后使用 `apksigner verify` 确认 APK 签名结构有效。无需额外维护证书指纹副本。
 
-- 文件不提交 Git，建议权限 `0600`。
-- 源 `manifest.json` 是 AppID、名称和版本事实源；`build:apk` 不回写私有 `config.json`，只在临时输入快照中同步版本。
-- `storeFile` 必须是 `secrets/` 下安全相对路径。
-- online/local 不共享 config、keystore 或输出目录。
-
-## 7. `override` 白名单
-
-可选 `override/` 的路径相对 Android 工程根目录，只允许：
+## 3. 目录规范
 
 ```text
-simpleDemo/src/main/res/drawable*/icon.png|webp
-simpleDemo/src/main/res/drawable*/push.png|webp
-simpleDemo/src/main/res/drawable*/splash.png|webp
-simpleDemo/src/main/res/mipmap*/ic_launcher.png|webp
-simpleDemo/src/main/res/mipmap*/ic_launcher_round.png|webp
-simpleDemo/src/main/res/values/colors.xml
-simpleDemo/src/main/res/values/styles.xml
+reshine-mobile/
+├── online/                        # online UniApp
+├── local/
+│   ├── m/                         # 人工复制的 H5 源码，不提交
+│   └── src/hybrid/html/           # 构建生成的 H5 制品，不提交
+├── android-project/simpleDemo/    # HBuilderX 5.24.2026081301 原生模板
+├── docker/                        # APK 容器脚本
+├── scripts/                       # 宿主编排脚本
+├── config/<target>/
+│   ├── config.json                # 私有
+│   ├── override/                  # 可选白名单资源覆盖
+│   └── secrets/                   # 私有签名材料
+└── output/<target>/{wgt,apk}/     # 发布产物
 ```
 
-禁止覆盖 Gradle、Wrapper、脚本、Manifest、AppID/App Key/App 名配置文件、AAR/JAR、`test.jks`、正式 keystore 和任何工程控制文件。拒绝绝对路径、`..`、符号链接和特殊文件。
+旧的 `config/<target>/resources/apps` 不参与构建，并由 Git 忽略。每次 APK 构建都从本次 App-plus 输出生成一次性输入快照。
 
-## 8. `build:image`
+## 4. local H5 构建
 
 执行：
 
 ```bash
-npm run build:image
+npm run build:local-assets
+npm run build:local-assets -- --target local
 ```
 
-处理流程：
+流程：
 
-1. `scripts/build-image.js` 读取 `apk.image`，执行固定 `linux/amd64` 的 `docker build`。
-2. Docker 安装固定 JDK 17、Node 22、Android command-line tools、platform-tools、Android 35 platform、build-tools 35.0.0 和 Gradle 8.11.1 distribution。
-3. Wrapper distribution URL 改为镜像内文件，运行时不访问 Gradle 官网。
-4. 复制干净官方模板到 `/opt/template`。
-5. 复制模板至临时联网工程，执行一次完整构建：
+1. 开发人员人工复制 H5 源码到 `local/m`。脚本不读取任何仓库外目录。
+2. 脚本校验源码、输出路径、符号链接和特殊文件。
+3. 删除 `local/m/dist` 和 `local/src/hybrid/html` 旧输出。
+4. 在 `local/m` 执行 `npm install --no-audit --no-fund`，并设置 `HUSKY=0`；由于上游无锁文件，不能使用 `npm ci`。
+5. 以唯一锚点临时应用三项适配：Vue CLI `publicPath: './'`、Vue Router hash 模式、Axios 请求基址读取 `VUE_APP_LOCAL_API_BASE_URL`。脚本结束时恢复这三个源码文件；上游结构变化导致锚点不唯一时立即失败。
+6. 在 `local/m` 执行上游 `npm run build`。
+7. 校验 `local/m/dist/index.html`、入口引用文件、根绝对路径和远程 `uni.webview` 运行时依赖。
+8. 将校验通过的 `dist` 复制到 `local/src/hybrid/html` 并复验；失败时保留错误现场供排查，不恢复旧输出。
+
+H5 源码不是可直接加载的网页制品；只有上述适配后的 `dist` 能进入 APK。
+
+## 5. WebView 页面
+
+- local 启动页加载 `/hybrid/html/index.html#/index`。
+- online 启动页读取 `VUE_APP_WEBVIEW_URL`。
+- 两个页面均使用自定义导航样式并显示加载错误提示。
+- local 的局域网地址允许 HTTP，因此 Android 模板显式启用明文流量；生产网络仍应优先使用 HTTPS。
+
+## 6. 统一前端编排
+
+`scripts/build-app-plus.js` 是唯一 App-plus 构建实现；`build:wgt` 与 `build:apk` 直接复用它导出的构建函数。`scripts/utils/` 只保留至少被两个不同业务脚本直接调用的公共函数，local-assets 专属实现保留在 `scripts/build-local-assets.js`：
+
+1. 解析源 `manifest.json`。
+2. 目标配置 `localAssets` 时先执行 local H5 构建一次；online 跳过。
+3. 删除旧 App-plus 输出并调用子项目 `npm run build:app-plus`。
+4. 校验输出目录、生成的 `manifest.json`、App ID、versionName 和 versionCode。
+
+命令关系：
+
+- `build:local-assets`：只准备 local H5。
+- `build:app-plus`：准备目标所需本地资源并构建一次 App-plus。
+- `build:wgt`：复用同一 App-plus 实现；开始时删除旧 WGT 输出目录，在正式目录中创建并校验新 WGT。
+- `build:apk`：复用同一 App-plus 实现，再创建一次性 APK 输入快照；开始 APK 阶段时删除旧 APK 输出目录。
+- `build:image`：只构建 Android 镜像，与目标、`.env`、H5 和 UniApp 构建无关。
+- `update:version`：选择一个目标后读取统一 `manifest.json` 版本，直接选择 `patch`、`minor` 或 `major`，不再区分 WGT/APK 发布类型；预览并确认后原子更新 `versionName`，同时将 `versionCode` 加一。
+
+### 6.1 统一版本更新规则
+
+执行：
 
 ```bash
-./gradlew --no-daemon --refresh-dependencies clean :simpleDemo:assembleRelease
+npm run update:version
+npm run update:version -- --target online
+npm run update:version -- --target local
 ```
 
-6. 要求 release APK 生成且 `apksigner verify` 成功；该构建使用官方示例资源和 `test.jks`，同时将正式 APK 构建所需的 Gradle/Maven 依赖完整写入 `/opt/gradle-home`。
-7. 删除联网工程和其中的构建产物，只保留干净 `/opt/template`、Android SDK、Gradle distribution 以及联网构建形成的 Gradle/Maven 缓存。
-8. 最终镜像复制并只读保存上述模板、固定工具链和缓存，以及 `docker/*` 脚本，并切换到非 root `builder` 用户。Dockerfile 将 `COPY docker /opt/scripts` 放在联网预热层之后，因此只修改容器脚本时可复用耗时的 Gradle 预热缓存层。
-9. 宿主执行 `docker image inspect` 确认镜像存在。
+交互流程固定为：
 
-镜像阶段只执行一次联网完整 APK 构建，不重复执行第二次离线 APK 构建。离线能力由后续 `build:apk` 的 `--network=none` 容器和 Gradle `--offline` 实际构建验证；如果联网预热未缓存完整依赖，业务 APK 构建会明确失败。
+1. 未传 `--target` 时选择 online 或 local；传入时校验目标并跳过项目选择。
+2. 读取目标 `src/manifest.json`，展示当前 `versionName` 和 `versionCode`。
+3. 展示语义化版本规则，固定按 `patch`、`minor`、`major` 从小到大逐行说明：`patch` 修订版本加一，`minor` 次版本加一且修订版本归零，`major` 主版本加一且次版本、修订版本归零；`versionCode` 单独说明为每次固定加一。选择列表使用单行选项直接预览三个 `versionName` 结果，不展示适用范围：
 
-不使用 `prepare-cache-input`、假业务资源、正式配置、正式 App Key 或正式证书。真实完整构建用于填充可复用缓存，并验证官方模板本身可生成有效 APK。
+```text
+当前版本 · online
+  versionName  1.4.7
+  versionCode  108
+升级方式
+  patch  修订版本 +1
+  minor  次版本 +1，修订版本归零
+  major  主版本 +1，次版本和修订版本归零
+  versionCode 每次发布固定 +1：108 → 109
+? 请选择版本升级级别
+❯ patch（修订）  1.4.7 → 1.4.8
+  minor（次版）  1.4.7 → 1.5.0
+  major（主版）  1.4.7 → 2.0.0
+```
+4. 用户选择升级级别；无论选择哪一级，`versionCode` 都在当前值上加一。
+5. 展示所选级别以及 `versionName`、`versionCode` 的新旧值，默认不确认；只有用户明确确认才写入。
+6. 原子更新清单中唯一的顶层 `versionName` 和 `versionCode` 字符串字段，回读确认版本正确且其他内容未变化；失败时恢复原文件。
 
-## 9. `build:apk` 宿主流程
+版本更新与产物类型解耦。更新后由用户单独执行 `build:wgt`、`build:apk` 或两者；紧急 APK 修复可以选择 `patch`，存在兼容性变化的 WGT 也可以选择 `minor` 或 `major`。
+
+## 7. Android 镜像与权限基线
+
+镜像标签为 `android-builder:5.24.2026081301-r6`，平台固定 `linux/amd64`。镜像构建阶段安装 JDK 17、Android SDK 35、Build Tools 35.0.0、Gradle 8.11.1，并通过联网预热构建形成运行时离线缓存。运行 APK 构建时使用 `--network=none` 和 Gradle `--offline`。
+
+`android-project/simpleDemo/src/main/AndroidManifest.xml` 是 APK 原生权限事实源。当前模板显式声明：
+
+- 网络与 Wi-Fi 状态；
+- 相机、录音、振动和唤醒；
+- 粗略/精确位置；
+- Android 12 之前和之后的蓝牙权限；
+- 可选相机、自动对焦和低功耗蓝牙硬件能力。
+
+UniApp `src/manifest.json` 中的权限不会被当前离线原生模板自动合并，因此新增权限必须同步修改 Android 模板、提高镜像修订号、更新本文并验收最终 APK Manifest。
+
+当前 Android 权限按实际业务代码最小化：仅保留联网和分版本 BLE 权限。`INTERNET` 用于 WebView、局域网 API 和打印图片读取；Android 11 及以下使用 `BLUETOOTH`、`BLUETOOTH_ADMIN`，Android 6 至 9 的 BLE 扫描使用粗略位置，Android 10 至 11 使用精确位置；Android 12 及以上仅使用 `BLUETOOTH_SCAN` 和 `BLUETOOTH_CONNECT`，扫描声明 `neverForLocation`。Honeywell 扫码通过专用系统服务广播，不使用系统相机；代码不使用麦克风、振动、唤醒锁、Wi-Fi 控制、联系人、电话、共享存储或媒体库，因此不声明相关权限。模板同时阻止 DCloud AAR 合并无业务依据的存储、媒体、桌面角标和设备标识权限，最终结果以构建后 APK 的权限列表为准。
+
+Honeywell 扫码当前不兼容 `targetSdkVersion >= 34` 的动态广播接收器规则；升级目标 SDK 前必须使用带 `RECEIVER_EXPORTED` 或 `RECEIVER_NOT_EXPORTED` 标志的注册方式，增加权限无法解决该问题。
+
+## 8. APK 构建与发布
 
 执行：
 
@@ -197,121 +210,72 @@ npm run build:apk -- --target online
 npm run build:apk -- --target local
 ```
 
-未传目标时在交互终端单选，非交互环境必须显式传入 `--target`。
-
 流程：
 
-1. 读取 target、UniApp manifest、私有 config 和镜像引用，校验 AppID/名称一致以及 Android/签名关键字段。
-2. 以 manifest 的 versionName/versionCode 为本次唯一版本，不修改源 config。
-3. 删除旧 `dist/build/app-plus`，在目标子项目执行 `npm run build:app-plus`。
-4. 校验本次 App-plus 输出非空，其 manifest 的 AppID和版本与源码一致。
-5. 在正式 APK 输出目录的同级 `.staging/` 下创建唯一运行目录。该目录位于项目共享路径内，可被 Docker Desktop 或 Colima 虚拟机稳定绑定挂载，成功或失败后都会删除：
+1. 先读取私有配置和源 manifest，确认 App ID 与名称一致，再执行前端构建。
+2. App-plus 构建通过后，创建仓库根目录下的一次性 APK 输入目录，并先删除、重建 `output/<target>/apk`。
+3. 一次性输入包含运行时 `config.json`、本次 App-plus、可选 override 和 secrets。
+4. Docker 输入只读、正式输出目录可写，容器断网并移除 Linux capabilities。
+5. 容器复制只读模板和 Gradle 缓存到 `/work`，注入配置、资源和签名后离线构建，并使用 `apksigner` 验证 APK 签名结构。
+6. 容器成功后清空挂载的正式输出目录并写入唯一 APK。
+7. 宿主再次校验正式输出只包含一个非空普通 APK 文件。
+8. 构建成功或失败均删除一次性输入目录；失败不恢复已删除的旧 APK。
+
+## 9. 容器输入与 APK 输出
+
+一次性输入：
 
 ```text
-<input>/
-  config.json                    # 本次同步版本后的运行时副本
-  resources/apps/<appid>/www/   # 本次 App-plus 输出
-  override/                      # 可选副本
-  secrets/                       # 私有签名副本
-<output>/                        # 容器暂存输出
+/input/
+├── config.json
+├── resources/apps/<appid>/www/
+├── override/                  # 可选
+└── secrets/                   # 私有
 ```
 
-6. 启动固定镜像：`--rm --platform=linux/amd64 --network=none --cap-drop=ALL --security-opt=no-new-privileges`；输入只读、输出可写。运行时 config 同步记录预期镜像引用，容器通过环境变量接收实际镜像标识并在导出 metadata 前比对；不通过环境变量传 Secret。
-7. 容器成功后，宿主校验 APK、`.sha256`、`build-metadata.json`、`COMPLETE` 的文件集合、摘要、AppID、包名和版本。
-8. 通过后将暂存输出原子替换正式 `output/<target>/apk`；失败保留上一版成功产物。
-9. 无论成功失败都删除本次 `.staging/` 运行目录；没有其他并发构建时同时移除空的 `.staging/` 父目录。
-
-## 10. 容器 `build:apk` 流程
-
-`docker/entrypoint.sh` 是镜像入口，仅负责：
-
-1. 检查 `/input/config.json`、`/opt/template` 和可写 `/output`。
-2. 将只读 `/opt/gradle-home` 复制成 `/work/gradle-home`。
-3. 调用 `prepare-project.js /opt/template /input /work/project`。
-4. 执行 `./gradlew --offline --no-daemon --stacktrace clean :simpleDemo:assembleRelease`。
-5. 要求 release APK 恰好一个，使用 `apksigner` 验证签名并读取证书 SHA-256。
-6. 调用 `export-metadata.js` 生成非敏感 metadata、目标文件名和 APK 摘要。
-7. 输出 APK、`.sha256`、`build-metadata.json`，最后写 `COMPLETE`。
-8. 退出时删除项目、缓存和发布临时目录。
-
-`docker/prepare-project.js` 事务式执行：
-
-1. 解析和校验运行时 config。
-2. 复制干净模板到 `/work` 随机临时目录，并将临时副本规范化为当前非 root 用户可写，同时保留 `gradlew` 等原有可执行文件的执行位；镜像内 `/opt/template` 继续保持只读。
-3. 在临时 `simpleDemo/build.gradle` 中精确且唯一地替换 namespace、applicationId、版本和四个签名字段。
-4. 修改 `strings.xml` 的 App 名、`dcloud_control.xml` 的 AppID、Manifest 的 DCloud App Key。
-5. 删除官方示例 apps，复制本次 `resources/apps/<appid>` 并校验其 AppID和版本。
-6. 应用白名单 override。
-7. 将正式证书复制为临时 `simpleDemo/release.keystore`。
-8. 全部成功后原子形成 `/work/project`；失败删除临时工程。
-
-镜像内模板永不原地修改。正式签名和 App Key只存在于只读输入及容器临时工程，不进入镜像层和输出。
-
-## 11. 产物
-
-正式目录只包含：
+正式输出只保留一个 APK：
 
 ```text
 output/<target>/apk/
-├── <name>-<versionName>-<versionCode>.apk
-├── <apk>.sha256
-├── build-metadata.json
-└── COMPLETE
+└── <name>-<versionName>-<versionCode>.apk
 ```
 
-metadata 包含 schema 版本、应用身份、包名、namespace、版本、模板版本、实际镜像引用、APK 文件名/大小/SHA-256 和签名证书 SHA-256。不得包含 App Key、密码或 keystore 路径/内容。
+容器在临时 Android 工程内完成 release 构建并使用 `apksigner verify` 验证签名结构，随后清空正式输出目录并复制 APK。宿主要求输出目录只包含一个非空普通 APK 文件。
 
-`COMPLETE` 内容为 APK SHA-256，并最后写入。消费者只有看到它后才读取本次产物。
+### 9.1 APK 附加产物留档
 
-## 12. Secret 与 Git
+早期实现曾随 APK 生成以下三个附加产物：
 
-- 忽略 `config/*/config.json`、`config/*/secrets/`、真实 `.env`、`*.keystore`、`*.jks`、`*.p12`、`*.pfx`。
-- 唯一例外是官方模板自带 `android-project/simpleDemo/test.jks`，只用于镜像预热与离线验收，禁止用于正式 APK。
-- `android-old/` 整体忽略且不进入镜像。
-- 禁止日志打印 config 全文、App Key、密码或证书内容。
-- 已经进入 Git 历史或暂存区的正式证书与密码必须人工移除并轮换；忽略规则不能清除历史泄露。
+| 附加产物 | 原用途 | 必要性结论 |
+| --- | --- | --- |
+| `<apk>.sha256` | 保存 APK 的 SHA-256，用于传输或存储后的完整性比对 | Android 安装和本次同步构建不需要；需要校验时可直接对 APK 计算摘要 |
+| `build-metadata.json` | 记录 App ID、Android 包名、namespace、版本、模板、镜像、APK 文件名、大小和摘要，供构建追溯与宿主复验 | 属于追溯信息，不是 APK 构建、签名或安装的必要输入和输出 |
+| `COMPLETE` | 保存 APK 摘要并表示容器写出流程完成 | `docker run` 的同步退出码已经表达成功或失败，与摘要和文件校验重复 |
 
-## 13. 其他根命令
+本版本选择精简输出：不再生成、复制或校验上述附加产物，正式目录只保留 APK。该表仅记录附加产物的历史用途和取舍依据，不代表当前实现仍支持这些文件。若以后存在制品仓库追溯、跨系统异步投递或离线传输验签需求，应作为独立需求重新设计，不默认恢复全部附加文件。
 
-- `init:uniapp -- --targets online,local`：初始化指定子项目依赖。
-- `build:app-plus -- --target <target>`：删除旧输出并构建一个目标 App-plus。
-- `build:wgt -- --target <target>`：构建、校验并输出一个目标 WGT，不读取 Android config 或签名。
-- `update:version -- --target <target>`：交互选择 WGT/APK 版本级别，只原子更新目标 `src/manifest.json`。
+## 10. `override` 白名单
 
-## 14. 安全和失败语义
+仅允许覆盖 `simpleDemo` 下的应用图标、推送图标、启动图、launcher 图标、`colors.xml` 和 `styles.xml`。禁止覆盖 Gradle、Manifest、脚本、源码、AAR/JAR、App-plus 资源和签名配置。绝对路径、`..`、符号链接和特殊文件必须拒绝。
 
-- APK 容器完全断网、非 root、输入只读、输出独立可写。
-- 不挂载宿主 Gradle 缓存、源码或 Android 工程。
-- 动态输入校验路径边界、符号链接、普通文件类型和 override 白名单。
-- 任一步骤失败不得写 `COMPLETE`，不得替换上一版正式 APK。
-- 项目输出目录同级的 `.staging/` 输入快照和容器临时工程在退出时删除；源 config、secrets、override 和模板不得变化。
-- 镜像依赖必须为固定版本；新增依赖必须重新执行一次完整联网预热，并通过后续断网业务 APK 构建验收。
+## 11. 安全与版本控制
 
-## 15. 验收标准
+- 忽略 `local/m`、生成的 `local/src/hybrid/html`、旧 `config/*/resources`、真实 `.env`、私有 config、secrets 和所有输出。
+- 模板内 `test.jks` 只用于镜像预热，不得用于正式 APK。
+- 不在日志、元数据、命令行或 Docker 环境变量中传递密码和 App Key。
+- Docker 下载 URL 和基础镜像目前尚未全部固定 SHA-256/digest；因此当前实现具备运行时断网能力，但镜像制作供应链尚未达到严格可复现级别。
 
-### 15.1 自动测试
+## 12. 验收标准
 
-- target 参数、manifest JSONC 与版本解析；
-- config schema 与安全相对路径；
-- 官方 `simpleDemo` 路径和精确唯一替换；
-- XML/Groovy 特殊字符；
-- App-plus AppID/版本；
-- override 白名单、路径穿越和符号链接；
-- metadata、SHA-256、输出文件集合；
-- Docker `--network=none` 和只读输入；
-- 构建失败保留旧成功产物。
+自动化必须覆盖目标过滤、manifest 解析、local 环境变量、适配锚点、H5 制品校验、App-plus 身份、路径安全、Android 权限、Docker 参数和输出完整性。
 
-### 15.2 镜像与端到端
+发布前还必须实际完成：
 
-1. 从无可用业务输入状态执行 `build:image`，一次联网完整构建成功并生成签名有效的官方示例 APK。
-2. 确认最终镜像保留联网构建形成的 Gradle/Maven 缓存，且 `/opt/template` 不包含联网工程的构建产物。
-3. online、local 分别使用新容器、`--network=none` 和 Gradle `--offline` 构建成功；该步骤同时作为镜像离线能力验收。
-4. 验证 APK 包名、versionName、versionCode、UniApp AppID、应用名、签名指纹和 SHA-256。
-5. 按 online、local、online 顺序构建，确认身份、资源和签名不串用。
-6. 构建前后模板和私有源输入不变。
-7. 缺依赖、错误签名、错误 AppID/版本、越权 override 和符号链接输入均明确失败，且保留旧成功产物。
-8. 日志、metadata 和输出中不存在 App Key、密码或 keystore。
+1. 人工准备 `local/m` 和 `local/.env`，执行 `build:local-assets`，确认 `hybrid/html` 完整；构建失败时确认旧输出已删除并保留可排查的 `local/m/dist`。
+2. 分别构建 online/local App-plus，确认 local 包含 H5，online 不包含 local H5。
+3. 分别构建 WGT，解包确认身份、版本和 local 静态资源完整。
+4. 构建 r6 镜像，再分别构建 APK；检查最终 Android Manifest 权限、APK 签名有效性和 App-plus 资源。
+5. 验证 `build:image` 不触发任何前端构建。
+6. 真机验证 local 静态页面离线启动、Hash 路由、局域网 API、Bridge、扫码、蓝牙、称重和打印；验证 online WebView 地址加载。
 
-## 16. 最终能力
-
-使用固定 HBuilderX `5.24.2026081301` 官方 `simpleDemo` 模板和镜像内离线工具链，接收一个目标的一次性只读输入快照，在临时工程中注入 Android 配置、App-plus 资源、白名单覆盖和正式签名，完全断网生成并验证 APK；online/local 的前端 `.env`、Android 私有配置、资源、签名和输出彼此隔离。
+缺少 `local/m`、真实 `.env`、私有 config、keystore、Docker 或真机时，应将对应步骤报告为阻塞，不得宣称端到端验收通过。

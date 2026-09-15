@@ -24,6 +24,7 @@ yarn-error.log*
 *.sw*
 
 # Android APK private build configuration and signing materials
+/config/*/resources/
 /config/*/config.json
 /config/*/secrets/
 /android-old/
@@ -35,6 +36,8 @@ yarn-error.log*
 
 # Android APK build outputs
 /output/
+/local/m/
+/local/src/hybrid/html/
 
 # Android template generated state
 /android-project/.gradle/

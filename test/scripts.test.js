@@ -5,17 +5,34 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import { prepareProject } from '../docker/prepare-project.js';
-import { exportMetadata } from '../docker/export-metadata.js';
 import { validateApkConfig, validateDockerOutput, createDockerRunArgs } from '../scripts/build-apk.js';
 import { assertSafePath } from '../scripts/utils/config.js';
 import { parseManifest } from '../scripts/utils/manifest.js';
 import { parseSingleTarget } from '../scripts/utils/targets.js';
 import { createDockerBuildArgs } from '../scripts/build-image.js';
+import { applyLocalSourcePatches, parseEnv, validateLocalApiBaseUrl, validateLocalDistIndex } from '../scripts/build-local-assets.js';
+import { validateAppPlusOutput } from '../scripts/build-app-plus.js';
+import { calculateVersion } from '../scripts/update-version.js';
 
 test('单目标参数只接受 --target', () => {
   assert.equal(parseSingleTarget(['--target', 'online'], ['online', 'local']), 'online');
   assert.throws(() => parseSingleTarget(['--targets', 'online'], ['online']), /仅支持参数 --target/);
   assert.throws(() => parseSingleTarget(['--target', 'missing'], ['online']), /未知项目/);
+});
+
+test('版本升级支持 patch、minor 和 major 且 versionCode 始终加一', () => {
+  const current = { parts: [1, 4, 7], versionCode: 108 };
+  assert.deepEqual(calculateVersion(current, 'patch'), { versionName: '1.4.8', versionCode: 109, versionCodeText: '109' });
+  assert.deepEqual(calculateVersion(current, 'minor'), { versionName: '1.5.0', versionCode: 109, versionCodeText: '109' });
+  assert.deepEqual(calculateVersion(current, 'major'), { versionName: '2.0.0', versionCode: 109, versionCodeText: '109' });
+  assert.throws(() => calculateVersion(current, 'unknown'), /未知版本升级级别/);
+});
+
+test('版本升级拒绝语义版本段溢出', () => {
+  const max = Number.MAX_SAFE_INTEGER;
+  assert.throws(() => calculateVersion({ parts: [1, 2, max], versionCode: 1 }, 'patch'), /patch/);
+  assert.throws(() => calculateVersion({ parts: [1, max, 2], versionCode: 1 }, 'minor'), /minor/);
+  assert.throws(() => calculateVersion({ parts: [max, 2, 3], versionCode: 1 }, 'major'), /major/);
 });
 
 test('镜像构建参数使用配置中的唯一镜像引用', () => {
@@ -97,41 +114,71 @@ test('官方 simpleDemo 临时副本可注入业务配置并拒绝符号链接�
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('APK 元数据导出不包含敏感值', async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'reshine-metadata-'));
-  const configPath = path.join(root, 'config.json');
-  const apkPath = path.join(root, 'input.apk');
-  const outputPath = path.join(root, 'metadata.json');
-  const config = { template: { hbuilderxVersion: '5.24.2026081301', image: 'builder:test' }, uniapp: { name: 'fixture', appid: '__UNI__ABC123', versionName: '1.2.3', versionCode: 7 }, android: { namespace: 'com.example.fixture', applicationId: 'com.example.fixture', dcloudAppKey: 'do-not-export', signing: { storePassword: 'do-not-export' } } };
-  await writeFile(configPath, JSON.stringify(config));
-  await writeFile(apkPath, 'apk');
-  try {
-    const metadata = await exportMetadata(configPath, apkPath, outputPath, 'a'.repeat(64), 'builder:test');
-    assert.equal(metadata.schemaVersion, 1);
-    assert.equal(metadata.apk.size, 3);
-    const output = await readFile(outputPath, 'utf8');
-    assert.doesNotMatch(output, /do-not-export/);
-  } finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test('Docker 输出校验要求 APK、摘要、元数据和 COMPLETE 一致', async () => {
+test('Docker 输出目录只能保留一个非空 APK', async () => {
   const output = await mkdtemp(path.join(os.tmpdir(), 'reshine-output-'));
   const apkName = 'fixture-1.2.3-7.apk';
-  const apk = Buffer.from('apk');
-  const digest = (await import('node:crypto')).createHash('sha256').update(apk).digest('hex');
-  const config = { template: { hbuilderxVersion: '5.24.2026081301', image: 'builder:test' }, android: { namespace: 'com.example.fixture', applicationId: 'com.example.fixture' } };
-  const manifest = { appId: '__UNI__ABC123', versionName: '1.2.3', versionCodeNumber: 7 };
-  await writeFile(path.join(output, apkName), apk);
-  await writeFile(path.join(output, `${apkName}.sha256`), `${digest}  ${apkName}\n`);
-  await writeFile(path.join(output, 'COMPLETE'), `${digest}\n`);
-  await writeFile(path.join(output, 'build-metadata.json'), JSON.stringify({ result: 'success', app: { appid: manifest.appId, applicationId: config.android.applicationId, namespace: config.android.namespace, versionName: manifest.versionName, versionCode: manifest.versionCodeNumber }, template: config.template, apk: { fileName: apkName, sha256: digest, size: apk.length }, signing: { certificateSha256: 'a'.repeat(64) } }));
+  const apkPath = path.join(output, apkName);
+  await writeFile(apkPath, 'apk');
   try {
-    assert.equal(await validateDockerOutput(output, config, manifest), path.join(output, apkName));
-    await writeFile(path.join(output, 'COMPLETE'), 'invalid\n');
-    await assert.rejects(validateDockerOutput(output, config, manifest), /COMPLETE/);
+    assert.equal(await validateDockerOutput(output), apkPath);
+    await writeFile(path.join(output, 'build-metadata.json'), '{}');
+    await assert.rejects(validateDockerOutput(output), /只能包含 1 个 APK/);
   } finally { await rm(output, { recursive: true, force: true }); }
 });
 
+test('local 环境变量与源码适配可校验且不修改输入', () => {
+  assert.equal(parseEnv('# comment\nVUE_APP_LOCAL_API_BASE_URL=http://192.168.1.10:8080/').VUE_APP_LOCAL_API_BASE_URL, 'http://192.168.1.10:8080/');
+  assert.equal(validateLocalApiBaseUrl('http://192.168.1.10:8080/'), 'http://192.168.1.10:8080');
+  assert.throws(() => validateLocalApiBaseUrl('file:///tmp'), /HTTP/);
+  const original = new Map([
+    ['vue.config.js', "module.exports = {\n  lintOnSave: false,\n};\n"],
+    ['src/router/init.js', "const router = {\n    mode: window.LcapVueRouterConfig?.mode || 'history',\n};\n"],
+    ['src/config.js', "    // 修改请求baseURL\n    // _options.baseURL = 'https://some-domain.com/api';\n"]
+  ]);
+  const patched = applyLocalSourcePatches(original);
+  assert.match(patched.get('vue.config.js'), /publicPath: '\.\/'/);
+  assert.match(patched.get('src/router/init.js'), /mode: 'hash'/);
+  assert.match(patched.get('src/config.js'), /VUE_APP_LOCAL_API_BASE_URL/);
+  assert.doesNotMatch(original.get('vue.config.js'), /publicPath/);
+});
+
+test('local H5 入口拒绝根绝对和远程运行时资源', () => {
+  assert.deepEqual(validateLocalDistIndex('<script src="js/app.js"></script><link href="css/app.css">'), ['js/app.js', 'css/app.css']);
+  assert.throws(() => validateLocalDistIndex('<script src="/js/app.js"></script>'), /根绝对资源/);
+  assert.throws(() => validateLocalDistIndex('<script src="https://cdn.example/app.js"></script>'), /远程运行时资源/);
+  assert.throws(() => validateLocalDistIndex('<script src="data:text/javascript,alert(1)"></script>'), /资源协议/);
+});
+
+test('App-plus 输出必须匹配 App ID 和版本', async () => {
+  const output = await mkdtemp(path.join(os.tmpdir(), 'reshine-app-plus-'));
+  const manifest = { appId: '__UNI__ABC123', versionName: '1.2.3', versionCode: '7' };
+  try {
+    await writeFile(path.join(output, 'manifest.json'), JSON.stringify({ id: manifest.appId, version: { name: manifest.versionName, code: manifest.versionCode } }));
+    await validateAppPlusOutput(output, manifest);
+    await writeFile(path.join(output, 'manifest.json'), JSON.stringify({ id: '__UNI__BAD', version: { name: '1.2.3', code: '7' } }));
+    await assert.rejects(validateAppPlusOutput(output, manifest), /App ID/);
+  } finally { await rm(output, { recursive: true, force: true }); }
+});
+
+test('Android 模板只声明业务必需的网络与分版本 BLE 权限', async () => {
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const manifest = await readFile(path.join(projectRoot, 'android-project/simpleDemo/src/main/AndroidManifest.xml'), 'utf8');
+  for (const permission of ['INTERNET', 'BLUETOOTH', 'BLUETOOTH_ADMIN', 'BLUETOOTH_SCAN', 'BLUETOOTH_CONNECT', 'ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION']) {
+    assert.match(manifest, new RegExp(`android\\.permission\\.${permission}`));
+  }
+  for (const permission of ['CAMERA', 'RECORD_AUDIO', 'VIBRATE', 'WAKE_LOCK', 'ACCESS_WIFI_STATE', 'CHANGE_NETWORK_STATE', 'CHANGE_WIFI_STATE', 'FLASHLIGHT']) {
+    assert.doesNotMatch(manifest, new RegExp(`android\\.permission\\.${permission}(?:"|\\s)`));
+  }
+  assert.match(manifest, /android\.permission\.ACCESS_COARSE_LOCATION" android:maxSdkVersion="28"/);
+  assert.match(manifest, /android\.permission\.ACCESS_FINE_LOCATION" android:maxSdkVersion="30"/);
+  assert.match(manifest, /android\.permission\.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation"/);
+  assert.match(manifest, /android\.hardware\.bluetooth_le" android:required="false"/);
+  assert.doesNotMatch(manifest, /android\.hardware\.camera/);
+  for (const permission of ['ACCESS_NETWORK_STATE', 'WRITE_EXTERNAL_STORAGE', 'READ_EXTERNAL_STORAGE', 'READ_MEDIA_IMAGES', 'READ_MEDIA_VIDEO', 'READ_MEDIA_VISUAL_USER_SELECTED']) {
+    assert.match(manifest, new RegExp(`android\\.permission\\.${permission}" tools:node="remove"`));
+  }
+  assert.match(manifest, /usesCleartextTraffic="true"/);
+});
 test('路径安全检查拒绝符号链接逃逸', async () => {
   const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const outside = await mkdtemp(path.join(os.tmpdir(), 'reshine-outside-'));

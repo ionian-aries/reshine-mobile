@@ -1,10 +1,10 @@
-import { createHash } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { assertSafePath, normalizeError, readBuildConfig, resolveProjectPath, resolveUniappTarget, validateUniappProject } from './utils/config.js';
+import { buildAppPlus } from './build-app-plus.js';
+import { assertSafePath, normalizeError, readBuildConfig, resolveProjectPath, resolveUniappTarget } from './utils/config.js';
 import { parseManifest } from './utils/manifest.js';
-import { runCommand, runNpm } from './utils/process.js';
+import { runCommand } from './utils/process.js';
 import { chooseSingleTarget } from './utils/targets.js';
 
 const TEMPLATE_VERSION = '5.24.2026081301';
@@ -34,34 +34,22 @@ export function validateApkConfig(value) {
   return config;
 }
 async function readApkConfig(file) { return validateApkConfig(JSON.parse(await readFile(file, 'utf8'))); }
-async function sha256File(file) { return createHash('sha256').update(await readFile(file)).digest('hex'); }
 async function copyOptionalDirectory(source, target) {
-  const info = await stat(source).catch(() => null);
-  if (info) { if (!info.isDirectory()) throw new Error(`${source} 必须是目录`); await cp(source, target, { recursive: true }); }
+  const info = await lstat(source).catch(() => null);
+  if (!info) return;
+  if (info.isSymbolicLink() || !info.isDirectory()) throw new Error(`${source} 必须是非符号链接目录`);
+  await assertSafePath(source, { fieldName: source });
+  await cp(source, target, { recursive: true });
 }
-async function buildAppPlus(target, manifest, destination) {
-  const appPlus = path.join(target.dir, 'dist', 'build', 'app-plus');
-  await rm(appPlus, { recursive: true, force: true });
-  await runNpm(['run', 'build:app-plus'], { cwd: target.dir, label: 'App-plus 构建' });
-  if (!(await stat(appPlus).catch(() => null))?.isDirectory() || !(await readdir(appPlus)).length) throw new Error('App-plus 输出为空');
-  const generated = JSON.parse(await readFile(path.join(appPlus, 'manifest.json'), 'utf8'));
-  if (generated.id !== manifest.appId || String(generated.version?.name ?? '') !== manifest.versionName || String(generated.version?.code ?? '') !== manifest.versionCode) throw new Error('App-plus 输出身份或版本不一致');
-  await mkdir(destination, { recursive: true });
-  await cp(appPlus, destination, { recursive: true });
-}
-export async function validateDockerOutput(outputDir, config, manifest) {
-  const files = (await readdir(outputDir, { withFileTypes: true })).filter((item) => item.isFile()).map((item) => item.name).sort();
-  const apks = files.filter((name) => name.endsWith('.apk'));
-  if (apks.length !== 1) throw new Error(`Docker 输出 APK 数量必须为 1，实际为 ${apks.length}`);
-  const apkName = apks[0];
-  const expected = ['COMPLETE', 'build-metadata.json', apkName, `${apkName}.sha256`].sort();
-  if (files.length !== expected.length || files.some((name, index) => name !== expected[index])) throw new Error(`Docker 输出文件集合无效：${files.join(', ')}`);
-  const digest = await sha256File(path.join(outputDir, apkName));
-  if ((await readFile(path.join(outputDir, `${apkName}.sha256`), 'utf8')).trim() !== `${digest}  ${apkName}`) throw new Error('APK SHA-256 文件不一致');
-  if ((await readFile(path.join(outputDir, 'COMPLETE'), 'utf8')).trim() !== digest) throw new Error('COMPLETE 标记不一致');
-  const metadata = JSON.parse(await readFile(path.join(outputDir, 'build-metadata.json'), 'utf8'));
-  if (metadata.result !== 'success' || metadata.app?.appid !== manifest.appId || metadata.app?.applicationId !== config.android.applicationId || metadata.app?.namespace !== config.android.namespace || metadata.app?.versionName !== manifest.versionName || metadata.app?.versionCode !== manifest.versionCodeNumber || metadata.template?.hbuilderxVersion !== config.template.hbuilderxVersion || metadata.template?.image !== config.template.image || metadata.apk?.fileName !== apkName || metadata.apk?.sha256 !== digest || metadata.apk?.size !== (await stat(path.join(outputDir, apkName))).size || !/^[a-f0-9]{64}$/.test(metadata.signing?.certificateSha256 ?? '')) throw new Error('Docker 构建元数据不一致');
-  return path.join(outputDir, apkName);
+export async function validateDockerOutput(outputDir) {
+  const entries = await readdir(outputDir, { withFileTypes: true });
+  if (entries.some((item) => !item.isFile())) throw new Error('Docker 输出目录只能包含普通文件');
+  const apks = entries.filter((item) => item.name.endsWith('.apk'));
+  if (entries.length !== 1 || apks.length !== 1) throw new Error(`Docker 输出目录必须且只能包含 1 个 APK，实际内容：${entries.map((item) => item.name).join(', ') || '空'}`);
+  const apkPath = path.join(outputDir, apks[0].name);
+  const info = await stat(apkPath);
+  if (info.size === 0) throw new Error('Docker 输出 APK 为空');
+  return apkPath;
 }
 export function createDockerRunArgs(image, inputDir, outputDir) {
   const imageName = requireString(image, 'apk.image');
@@ -70,32 +58,6 @@ export function createDockerRunArgs(image, inputDir, outputDir) {
 export async function runDockerBuild(image, inputDir, outputDir) {
   await runCommand('docker', createDockerRunArgs(image, inputDir, outputDir), { label: 'Docker Android APK 构建' });
 }
-async function removeEmptyDirectory(directory) {
-  try {
-    await rm(directory, { recursive: false });
-  } catch (error) {
-    if (error.code === 'ENOENT' || error.code === 'ENOTEMPTY') return;
-    if (error.code === 'EISDIR' || error.code === 'EPERM') {
-      if ((await readdir(directory)).length === 0) await rm(directory, { recursive: true, force: true });
-      return;
-    }
-    throw error;
-  }
-}
-async function publishDirectory(stagedOutput, finalOutput) {
-  const parent = path.dirname(finalOutput);
-  const backup = path.join(parent, `.${path.basename(finalOutput)}-backup-${process.pid}-${Date.now()}`);
-  await mkdir(parent, { recursive: true });
-  const exists = await stat(finalOutput).catch(() => null);
-  try {
-    if (exists) await rename(finalOutput, backup);
-    await rename(stagedOutput, finalOutput);
-    await rm(backup, { recursive: true, force: true });
-  } catch (error) {
-    if (!(await stat(finalOutput).catch(() => null)) && await stat(backup).catch(() => null)) await rename(backup, finalOutput);
-    throw error;
-  }
-}
 async function main() {
   const { apk, targets, availableNames } = await readBuildConfig();
   const name = await chooseSingleTarget(process.argv.slice(2), availableNames);
@@ -103,36 +65,32 @@ async function main() {
   const target = await resolveUniappTarget(name, targetConfig);
   const sourceInput = await resolveProjectPath(targetConfig?.apk?.inputDir, `${name}.apk.inputDir`);
   const output = await resolveProjectPath(targetConfig?.output?.apkDir, `${name}.output.apkDir`, { allowMissing: true });
-  const { manifestPath } = await validateUniappProject(target);
-  const manifest = parseManifest(await readFile(manifestPath, 'utf8'));
   const sourceConfig = await readApkConfig(path.join(sourceInput.absolutePath, 'config.json'));
-  if (sourceConfig.uniapp.appid !== manifest.appId || sourceConfig.uniapp.name !== manifest.value.name) throw new Error('config.json 与 UniApp manifest 身份不一致');
+  const sourceManifest = parseManifest(await readFile(path.join(target.dir, 'src', 'manifest.json'), 'utf8'));
+  if (sourceConfig.uniapp.appid !== sourceManifest.appId || sourceConfig.uniapp.name !== sourceManifest.value.name) throw new Error('config.json 与 UniApp manifest 身份不一致');
+  const { appPlusDir, manifest } = await buildAppPlus(target, targetConfig);
   const runtimeConfig = structuredClone(sourceConfig);
   runtimeConfig.uniapp.versionName = manifest.versionName;
   runtimeConfig.uniapp.versionCode = manifest.versionCodeNumber;
   runtimeConfig.template.image = requireString(apk?.image, 'apk.image');
-  const stagingParent = path.join(path.dirname(output.absolutePath), '.staging');
-  await mkdir(stagingParent, { recursive: true });
-  const runRoot = await mkdtemp(path.join(stagingParent, `${name}-`));
+  await mkdir(output.absolutePath, { recursive: true });
+  await rm(output.absolutePath, { recursive: true, force: true });
+  await mkdir(output.absolutePath, { recursive: true });
+  const runRoot = await mkdtemp(path.join(process.cwd(), `.apk-build-${name}-`));
   const input = path.join(runRoot, 'input');
-  const stagedOutput = path.join(runRoot, 'output');
   try {
     await mkdir(path.join(input, 'resources', 'apps', manifest.appId, 'www'), { recursive: true });
-    await mkdir(stagedOutput, { recursive: true });
     await writeFile(path.join(input, 'config.json'), `${JSON.stringify(runtimeConfig, null, 2)}\n`, { mode: 0o600 });
     await copyOptionalDirectory(path.join(sourceInput.absolutePath, 'override'), path.join(input, 'override'));
     await copyOptionalDirectory(path.join(sourceInput.absolutePath, 'secrets'), path.join(input, 'secrets'));
-    await buildAppPlus(target, manifest, path.join(input, 'resources', 'apps', manifest.appId, 'www'));
+    await cp(appPlusDir, path.join(input, 'resources', 'apps', manifest.appId, 'www'), { recursive: true });
     await assertSafePath(path.join(sourceInput.absolutePath, sourceConfig.android.signing.storeFile), { fieldName: `${name} keystore` });
-    await runDockerBuild(apk?.image, input, stagedOutput);
-    const stagedApk = await validateDockerOutput(stagedOutput, runtimeConfig, manifest);
-    const apkName = path.basename(stagedApk);
-    await publishDirectory(stagedOutput, output.absolutePath);
+    await runDockerBuild(apk?.image, input, output.absolutePath);
+    const apkPath = await validateDockerOutput(output.absolutePath);
     console.log(`[build:apk] ${name} APK 构建成功`);
-    console.log(path.join(output.absolutePath, apkName));
+    console.log(apkPath);
   } finally {
     await rm(runRoot, { recursive: true, force: true });
-    await removeEmptyDirectory(stagingParent);
   }
 }
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

@@ -1,5 +1,6 @@
 import { confirm, select } from '@inquirer/prompts';
 import { readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { normalizeError, readBuildConfig, resolveUniappTarget, validateUniappProject } from './utils/config.js';
 import { parseManifest } from './utils/manifest.js';
@@ -15,7 +16,7 @@ function parseManifestVersion(content) {
   return { versionName: manifest.versionName, versionCode: manifest.versionCodeNumber, versionCodeText: manifest.versionCode, parts };
 }
 
-function calculateVersion(current, level) {
+export function calculateVersion(current, level) {
   let [major, minor, patch] = current.parts;
   if (level === 'patch') {
     if (patch >= Number.MAX_SAFE_INTEGER) throw new Error('versionName 的 patch 无法安全自增');
@@ -24,11 +25,13 @@ function calculateVersion(current, level) {
     if (minor >= Number.MAX_SAFE_INTEGER) throw new Error('versionName 的 minor 无法安全自增');
     minor += 1;
     patch = 0;
-  } else {
+  } else if (level === 'major') {
     if (major >= Number.MAX_SAFE_INTEGER) throw new Error('versionName 的 major 无法安全自增');
     major += 1;
     minor = 0;
     patch = 0;
+  } else {
+    throw new Error(`未知版本升级级别：${level}`);
   }
   return {
     versionName: `${major}.${minor}.${patch}`,
@@ -105,43 +108,44 @@ async function restoreManifest(manifestPath, originalContent) {
   }
 }
 
-async function main() {
+export async function main() {
   const { targets, availableNames } = await readBuildConfig();
   console.log(`可用项目：${availableNames.join('、')}`);
   const targetName = await chooseSingleTarget(process.argv.slice(2), availableNames);
-  requireInteractiveTerminal('发布类型、升级级别和最终确认');
-
-  console.log('versionName：major.minor.patch（主版本.次版本.修订版本）');
-  const releaseType = await select({
-    message: '请选择发布类型',
-    choices: [
-      { name: 'WGT', value: 'WGT' },
-      { name: 'APK', value: 'APK' }
-    ]
-  });
-  let level;
-  if (releaseType === 'WGT') {
-    level = 'patch';
-    console.log('WGT 发布固定升级 patch（修订版本）');
-  } else {
-    level = await select({
-      message: '请选择版本升级级别',
-      choices: [
-        { name: 'minor（次版本）', value: 'minor' },
-        { name: 'major（主版本）', value: 'major' }
-      ]
-    });
-  }
+  requireInteractiveTerminal('升级级别和最终确认');
 
   const target = await resolveUniappTarget(targetName, targets[targetName]);
   const { manifestPath } = await validateUniappProject(target);
   const originalContent = await readFile(manifestPath, 'utf8');
   const current = parseManifestVersion(originalContent);
-  const next = calculateVersion(current, level);
+  const levels = [
+    { value: 'patch', label: 'patch（修订）' },
+    { value: 'minor', label: 'minor（次版）' },
+    { value: 'major', label: 'major（主版）' }
+  ];
+  const previews = Object.fromEntries(levels.map(({ value }) => [value, calculateVersion(current, value)]));
+
+  console.log(`当前版本 · ${targetName}`);
+  console.log(`  versionName  ${current.versionName}`);
+  console.log(`  versionCode  ${current.versionCodeText}`);
+  console.log('升级方式');
+  console.log('  patch  修订版本 +1');
+  console.log('  minor  次版本 +1，修订版本归零');
+  console.log('  major  主版本 +1，次版本和修订版本归零');
+  console.log(`  versionCode 每次发布固定 +1：${current.versionCodeText} → ${current.versionCode + 1}`);
+
+  const level = await select({
+    message: '请选择版本升级级别',
+    choices: levels.map(({ value, label }) => ({
+      name: `${label}  ${current.versionName} → ${previews[value].versionName}`,
+      value
+    }))
+  });
+  const next = previews[level];
+  const levelLabel = levels.find(({ value }) => value === level).label;
 
   console.log(`目标：${targetName}`);
-  console.log(`发布类型：${releaseType}`);
-  console.log(`升级级别：${level}`);
+  console.log(`升级级别：${levelLabel}`);
   console.log(`versionName: ${current.versionName} -> ${next.versionName}`);
   console.log(`versionCode: ${current.versionCodeText} -> ${next.versionCodeText}`);
 
@@ -169,7 +173,8 @@ async function main() {
   console.log('更新成功');
 }
 
-main().catch((error) => {
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) main().catch((error) => {
   console.error(`更新失败：${normalizeError(error).message}`);
   process.exitCode = 1;
 });

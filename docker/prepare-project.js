@@ -107,7 +107,7 @@ async function readConfig(inputDir) {
       applicationId: requiredString(config?.android?.applicationId, 'android.applicationId'),
       appName: requiredString(config?.android?.appName, 'android.appName'),
       dcloudAppKey: requiredString(config?.android?.dcloudAppKey, 'android.dcloudAppKey'),
-      signing: config?.android?.signing
+      signing: { ...(config?.android?.signing ?? {}) }
     }
   };
   if (!PACKAGE_NAME.test(normalized.android.namespace)) fail('android.namespace 格式无效');

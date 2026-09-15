@@ -39,7 +39,7 @@ COPY --from=cache /opt/gradle-home /opt/gradle-home
 COPY --from=cache /opt/gradle-8.11.1-bin.zip /opt/gradle-8.11.1-bin.zip
 COPY --from=cache /opt/template /opt/template
 COPY --from=cache /opt/scripts /opt/scripts
-RUN chmod 0555 /opt/scripts/entrypoint.sh /opt/scripts/prepare-project.js /opt/scripts/export-metadata.js \
+RUN chmod 0555 /opt/scripts/entrypoint.sh /opt/scripts/prepare-project.js \
  && chmod -R a-w /opt/template /opt/android-sdk /opt/gradle-home /opt/gradle-8.11.1-bin.zip \
  && chmod -R a+rX /opt/template /opt/android-sdk /opt/gradle-home \
  && chmod a+r /opt/gradle-8.11.1-bin.zip
