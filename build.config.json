@@ -3,6 +3,18 @@
     "image": "android-builder:5.24.2026081301-r1"
   },
   "targets": {
+    "demo": {
+      "uniapp": {
+        "dir": "demo"
+      },
+      "apk": {
+        "inputDir": "config/demo"
+      },
+      "output": {
+        "wgtDir": "output/demo/wgt",
+        "apkDir": "output/demo/apk"
+      }
+    },
     "online": {
       "uniapp": {
         "dir": "online"
