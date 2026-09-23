@@ -94,11 +94,9 @@ export default class BleManager {
     return this.serializeSession(async () => {
       this.assertAvailable(generation);
       this.registerGlobalListeners();
-      if (!this.permissionGranted) {
-        const permission = await this.permissions.requestBlePermissions();
-        this.assertAvailable(generation);
-        this.permissionGranted = !!permission.granted;
-      }
+      const permission = await this.requestPermissions();
+      this.assertAvailable(generation);
+      this.permissionGranted = !!permission.granted;
       if (!this.sessionOpened) {
         try {
           this.sessionOpening = true;
@@ -159,6 +157,10 @@ export default class BleManager {
       return enabled;
     } catch (error) {
       const normalized = normalizeError(error, ErrorCodes.SYSTEM_BLUETOOTH_UNSUPPORTED);
+      if (normalized.code === ErrorCodes.PERMISSION_DENIED) {
+        this.permissionGranted = false;
+        throw normalized;
+      }
       if (normalized.code === ErrorCodes.BLE_NOT_SUPPORTED) this.supported = false;
       return this.systemEnabled;
     }
@@ -171,6 +173,10 @@ export default class BleManager {
       return this.buildState(state.discovering);
     } catch (error) {
       const normalized = normalizeError(error, ErrorCodes.ADAPTER_OPEN_FAILED);
+      if (normalized.code === ErrorCodes.PERMISSION_DENIED) {
+        this.permissionGranted = false;
+        throw normalized;
+      }
       if (normalized.code === ErrorCodes.SYSTEM_BLUETOOTH_DISABLED) this.systemEnabled = false;
       return this.buildState();
     }
@@ -212,6 +218,7 @@ export default class BleManager {
     if (this.registry.hasActiveConnections() && opts.force !== true) {
       throw createBleError(ErrorCodes.ACTIVE_CONNECTIONS_EXIST, '存在活动设备连接；确认中断全部 BLE 任务后，请显式传入 force: true');
     }
+    await this.requestPermissions();
     await this.systemBluetooth.requestDisable();
     if (this.systemEnabled || this.sessionOpened || this.lastAdapterAvailable !== false) {
       this.systemEnabled = false;

@@ -216,12 +216,23 @@ test('App-plus 输出必须匹配 App ID 和版本', async () => {
 test('online App 启用 Bluetooth 模块且 Android 模板只声明业务必需权限', async () => {
   const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const sourceManifest = parseManifest(await readFile(path.join(projectRoot, 'online/src/manifest.json'), 'utf8'));
+  const localManifest = parseManifest(await readFile(path.join(projectRoot, 'local/src/manifest.json'), 'utf8'));
   assert.deepEqual(sourceManifest.value['app-plus'].modules.Bluetooth, {});
+  assert.deepEqual(
+    localManifest.value['app-plus'].distribute.android.permissions,
+    sourceManifest.value['app-plus'].distribute.android.permissions,
+  );
   const sourcePermissions = sourceManifest.value['app-plus'].distribute.android.permissions.join('\n');
   for (const permission of ['INTERNET', 'REQUEST_INSTALL_PACKAGES', 'BLUETOOTH', 'BLUETOOTH_ADMIN', 'BLUETOOTH_SCAN', 'BLUETOOTH_CONNECT', 'ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION']) {
     assert.match(sourcePermissions, new RegExp(`android\\.permission\\.${permission}`));
   }
   assert.doesNotMatch(sourcePermissions, /android\.permission\.CAMERA/);
+  assert.match(sourcePermissions, /android\.permission\.BLUETOOTH" android:maxSdkVersion="30"/);
+  assert.match(sourcePermissions, /android\.permission\.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/);
+  assert.match(sourcePermissions, /android\.permission\.ACCESS_COARSE_LOCATION" android:maxSdkVersion="28"/);
+  assert.match(sourcePermissions, /android\.permission\.ACCESS_FINE_LOCATION"\/>/);
+  assert.doesNotMatch(sourcePermissions, /ACCESS_FINE_LOCATION[^\n]*maxSdkVersion/);
+  assert.doesNotMatch(sourcePermissions, /neverForLocation/);
   assert.match(sourcePermissions, /android\.hardware\.bluetooth_le/);
 
   const manifest = await readFile(path.join(projectRoot, 'android-project/simpleDemo/src/main/AndroidManifest.xml'), 'utf8');
@@ -232,8 +243,12 @@ test('online App 启用 Bluetooth 模块且 Android 模板只声明业务必需�
     assert.doesNotMatch(manifest, new RegExp(`android\\.permission\\.${permission}(?:"|\\s)`));
   }
   assert.match(manifest, /android\.permission\.ACCESS_COARSE_LOCATION" android:maxSdkVersion="28"/);
-  assert.match(manifest, /android\.permission\.ACCESS_FINE_LOCATION" android:maxSdkVersion="30"/);
-  assert.match(manifest, /android\.permission\.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation"/);
+  assert.match(manifest, /android\.permission\.BLUETOOTH" android:maxSdkVersion="30"/);
+  assert.match(manifest, /android\.permission\.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/);
+  assert.match(manifest, /android\.permission\.ACCESS_FINE_LOCATION" \/>/);
+  assert.doesNotMatch(manifest, /android\.permission\.ACCESS_FINE_LOCATION" android:maxSdkVersion/);
+  assert.match(manifest, /android\.permission\.BLUETOOTH_SCAN" \/>/);
+  assert.doesNotMatch(manifest, /neverForLocation/);
   assert.match(manifest, /android\.hardware\.bluetooth_le" android:required="false"/);
   assert.doesNotMatch(manifest, /android\.hardware\.camera/);
   for (const permission of ['ACCESS_NETWORK_STATE', 'WRITE_EXTERNAL_STORAGE', 'READ_EXTERNAL_STORAGE', 'READ_MEDIA_IMAGES', 'READ_MEDIA_VIDEO', 'READ_MEDIA_VISUAL_USER_SELECTED']) {
@@ -241,6 +256,35 @@ test('online App 启用 Bluetooth 模块且 Android 模板只声明业务必需�
   }
   assert.match(manifest, /usesCleartextTraffic="true"/);
 });
+test('BLE 权限、错误归一化与会话权限复核在 local/online 保持一致', async () => {
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const relativeFiles = [
+    'src/uni_modules/app-ble-manager/js_sdk/platform/uni-permissions.js',
+    'src/uni_modules/app-ble-manager/js_sdk/errors/normalize.js',
+    'src/uni_modules/app-ble-manager/js_sdk/core/ble-manager.js',
+  ];
+  for (const relativeFile of relativeFiles) {
+    const localSource = await readFile(path.join(projectRoot, 'local', relativeFile), 'utf8');
+    const onlineSource = await readFile(path.join(projectRoot, 'online', relativeFile), 'utf8');
+    assert.equal(localSource, onlineSource, `${relativeFile} 应在 local/online 保持一致`);
+  }
+
+  const permissions = await readFile(path.join(projectRoot, 'online', relativeFiles[0]), 'utf8');
+  assert.match(permissions, /apiLevel >= 31[\s\S]*BLUETOOTH_SCAN[\s\S]*BLUETOOTH_CONNECT[\s\S]*ACCESS_FINE_LOCATION/);
+  assert.match(permissions, /:\s*\['android\.permission\.ACCESS_FINE_LOCATION'\]/);
+
+  const normalize = await readFile(path.join(projectRoot, 'online', relativeFiles[1]), 'utf8');
+  assert.match(normalize, /permissionDenied\s*=\s*\/permission/);
+  assert.match(normalize, /permissionDenied \? ErrorCodes\.PERMISSION_DENIED[\s\S]*UNI_ERROR_CODES\[nativeCode\]/);
+  assert.match(normalize, /securityexception/i);
+
+  const manager = await readFile(path.join(projectRoot, 'online', relativeFiles[2]), 'utf8');
+  assert.match(manager, /openAppBleSession\(\)[\s\S]*requestPermissions\(\)[\s\S]*platform\.openAdapter\(\)/);
+  assert.match(manager, /requestDisableSystemBluetooth\(options\)[\s\S]*requestPermissions\(\)[\s\S]*systemBluetooth\.requestDisable\(\)/);
+  assert.match(manager, /refreshSystemBluetoothState\(\)[\s\S]*PERMISSION_DENIED[\s\S]*throw normalized/);
+  assert.match(manager, /refreshAdapterState\(\)[\s\S]*PERMISSION_DENIED[\s\S]*throw normalized/);
+});
+
 test('路径安全检查拒绝符号链接逃逸', async () => {
   const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const outside = await mkdtemp(path.join(os.tmpdir(), 'reshine-outside-'));

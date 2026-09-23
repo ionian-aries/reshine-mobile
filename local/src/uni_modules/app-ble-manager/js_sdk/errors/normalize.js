@@ -34,8 +34,9 @@ export function normalizeError(error, fallbackCode, context) {
   }
   const nativeCode = error && (error.errCode !== undefined ? error.errCode : error.code);
   const nativeMessage = String((error && (error.errMsg || error.message)) || '');
+  const permissionDenied = /permission\s+(?:denied|not\s+granted)|securityexception/i.test(nativeMessage);
   const unavailable = /(?:openBluetoothAdapter|bluetooth).*?(?:not available|unavailable)/i.test(nativeMessage);
-  const code = UNI_ERROR_CODES[nativeCode] || (unavailable ? ErrorCodes.SYSTEM_BLUETOOTH_DISABLED : undefined) || fallbackCode || ErrorCodes.UNKNOWN;
+  const code = (permissionDenied ? ErrorCodes.PERMISSION_DENIED : undefined) || UNI_ERROR_CODES[nativeCode] || (unavailable ? ErrorCodes.SYSTEM_BLUETOOTH_DISABLED : undefined) || fallbackCode || ErrorCodes.UNKNOWN;
   const message = ERROR_MESSAGES[code] || nativeMessage || code;
   return createBleError(code, message, Object.assign({ nativeCode, nativeMessage, cause: error }, context || {}));
 }

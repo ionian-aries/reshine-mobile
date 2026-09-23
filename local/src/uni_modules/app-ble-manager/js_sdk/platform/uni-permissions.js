@@ -14,7 +14,11 @@ export default class UniPermissions {
     // Android 12（API 31）开始使用附近设备权限；旧版本扫描通常依赖定位权限。
     const apiLevel = Number(system.osAndroidAPILevel || 0);
     const permissions = apiLevel >= 31
-      ? ['android.permission.BLUETOOTH_SCAN', 'android.permission.BLUETOOTH_CONNECT']
+      ? [
+        'android.permission.BLUETOOTH_SCAN',
+        'android.permission.BLUETOOTH_CONNECT',
+        'android.permission.ACCESS_FINE_LOCATION',
+      ]
       : ['android.permission.ACCESS_FINE_LOCATION'];
 
     return new Promise((resolve, reject) => {
