@@ -2,6 +2,12 @@
 
 ## 1. 目标与边界
 
+### 1.1 第四阶段大图片 Bridge 构建基线（2026-09-22）
+
+online App 与 H5 依赖库现支持打印/预览图片双向附件传输：完整 RPC 超过 128 KiB 时使用 `transfer.start/chunk/complete/abort`，目标片长 48 KiB，每阶段 3 秒、最多 3 次提交；解码后单图上限 5 MiB，session 未释放附件预算 8 MiB、H5 同时 2 个/App 全局 4 个，活动 TTL 120 秒、完成未消费 TTL 30 秒。接收端允许乱序和内容一致的重复片，拒绝冲突重复、缺片与 SHA-256 不一致，并在消费或销毁时释放。
+
+`printer_preview` 的 manager 结果只允许图片 Data URL 或 `_doc/`、`_downloads/`、`file://` 沙箱临时路径；路径需规范化和读取前后限额检查，转换为 Data URL 后才可返回 H5，本地路径不得穿透 RPC。该能力属于 online App-plus 制品，Docker APK 阶段仍只封装已编译资源；发布时必须同步更新 online App 和 H5 Bridge，禁止只升级单端。
+
 本文是 `reshine-mobile` 的现行实现基准。项目包含两个 UniApp：
 
 | 目标 | 目录 | App ID | 页面来源 |
@@ -124,9 +130,16 @@ H5 源码不是可直接加载的网页制品；只有上述适配后的 `dist` 
 
 ## 5. WebView 页面
 
-- local 启动页加载 `/hybrid/html/index.html#/index`。
-- online 启动页读取 `VUE_APP_WEBVIEW_URL`。
-- 两个页面均使用自定义导航样式并显示加载错误提示。
+> **临时联调安全例外（2026-09-22）**：online 当前按用户要求直接使用 `VUE_APP_WEBVIEW_URL`，页面与 `app-capability-bridge-shell` 均暂不校验 URL 协议/origin，也不再传入 allowlist，因此任意配置地址可被真机 WebView 打开并获得桥接能力。此配置仅限受控真机调试；发布生产包前必须恢复 HTTP(S) 绝对 URL 校验和精确 origin allowlist，并完成恶意页面调用桥接的安全回归。Bridge 协议的消息结构、会话、代次和参数校验仍保留，但它们不能替代页面来源鉴权。
+
+- local 启动页通过同一 `app-capability-bridge-shell` 加载 `/hybrid/html/index.html#/index`；该路径按 APK 内本地资源处理，不执行 HTTP(S) origin 解析或网页来源规则。local H5 制品已包含配套依赖库导出源码；为使本地包拥有真实原生能力，`app-capability-bridge` 及其 `app-ble-manager`、`dothan-lpapi-ble` 依赖按 uni_module 自包含规则同步到 local，禁止从 sibling `online/` 目录做编译期引用。
+- online 启动页直接读取 `VUE_APP_WEBVIEW_URL` 并传给纯 JavaScript uni_module `app-capability-bridge` 的 Vue 2 壳组件。`app-capability-bridge/index.js` 导出幂等 `install(Vue)`，online/local 均在 `main.js` 通过 `Vue.use` 显式全局注册；页面不再 import 或局部声明 `components`。相较 easycom 的目录扫描与编译器隐式规则，此方案入口清晰、可单测、与现有 `app-upgrade` 安装方式一致。
+- 壳组件只在 `<web-view>` 的 `load` 事件后启动；不假设模板 HTML `id` 等于 HTML5 Plus `WebviewObject.id`，而是从页面 `children()` 过滤具备 `evalJS` 的候选，规范化在线 HTTP(S) URL 与本地/hybrid 路径后做 URL 唯一匹配。只有一个候选时可记录 `unique-fallback` 明确兜底，多候选无唯一匹配时失败且不猜测。绑定默认使用 4 秒总预算、200ms 间隔，destroy/reload 取消旧重试并以 generation 阻止迟到绑定；成功后保存明确原生对象引用。
+- 每次 WebView reload 都先取消旧绑定并幂等销毁旧 App bridge，再建立新 bridge；Bridge 建立前只缓冲最多 4 条通过完整协议校验的 `ready`，同 session 合并且不缓存业务消息，建立后顺序投递，reload/session/destroy 清理。App bridge 收到新 H5 `sessionId` 的 ready 时提升 generation、清理旧请求和订阅并确认新 session；历史 session 的迟到 ready 被拒绝，防止网页刷新后永久握手超时或回滚。
+- 壳组件 `mounted` 绑定页面原生 WebView `show/hide/close` 与 App-plus `resume/pause`；隐藏时停止当前扫码，关闭、组件销毁时完成全量幂等清理，重复解绑不产生副作用。普通 Vue/uni-app 子组件不能可靠自动收到页面 `onHide/onUnload`，所以不以组件同名 hook 代替，而由壳直接绑定运行时事件；`beforeDestroy` 作为组件树销毁兜底。
+- 当前桥接范围为 Android 第三阶段基础业务能力：在基础双端 RPC（ready/ready-ack、`bridge.ping`、`bridge.info`、双向 `register/call/await`、超时、并发乱序及 destroy）之上，已接入 `bluetooth_*`、`scale_*` 和 `printer_connect/disconnect/status/print/preview`。设备调用统一经 `app-ble-manager` 的公开 API，隐藏 canvas ID 会传入打印机连接和图像任务。
+- 本阶段不包含扫码和大图分片。打印/预览只接受不超过 128 KiB 直接传输阈值的小型 PNG/JPEG/WebP Data URL 或 HTTP(S) URL，超限返回 `LARGE_PAYLOAD_UNSUPPORTED`；`printer_cancel` 不注册、不导出。iOS 仍不属于当前完成范围。
+- 两个页面均使用自定义导航样式并显示加载错误提示。最小接入模板是 `<app-capability-bridge-shell :src="webviewUrl" />`（本地固定资源可直接写 `src="/hybrid/html/index.html#/index"`）；不声明 `ref`，也不在页面实现 `onReady/onShow/onHide/onUnload` 或手动 `destroy`。
 - local 的局域网地址允许 HTTP，因此 Android 模板显式启用明文流量；生产网络仍应优先使用 HTTPS。
 
 ## 6. 统一前端编排
@@ -279,3 +292,14 @@ output/<target>/apk/
 6. 真机验证 local 静态页面离线启动、Hash 路由、局域网 API、Bridge、扫码、蓝牙、称重和打印；验证 online WebView 地址加载。
 
 缺少 `local/m`、真实 `.env`、私有 config、keystore、Docker 或真机时，应将对应步骤报告为阻塞，不得宣称端到端验收通过。
+## 第五阶段：扫码与事件协议
+
+- Honeywell DCS 扫码仅由 `online/src/uni_modules/app-capability-bridge/js_sdk/services/honeywell-scan.js` 实现，不进入 `app-ble-manager`，业务页面无需增加扫码代码。
+- H5 兼容 action 为 `scan_start({softTrigger,timeout,profile,scanner})` 与 `scan_cancel({reason?})`；结果保持 `{status,code,message,data}`，扫码数据字段为 `data/codeId/aimId/charset`。
+- 扫码会话执行动态广播 Receiver 注册、DCS claim、可选软件触发、release 与 unregister。超时、取消、异常、页面隐藏、页面卸载和 bridge destroy 都会幂等清理。
+- Android MVP 使用旧基座可表达的双参数 `registerReceiver`。应用 `targetSdkVersion >= 34` 或 Receiver 无法安全注册时明确返回 `status=unsupported, code=SCAN_RECEIVER_UNAVAILABLE`；若后续必须提高 targetSdk，需升级原生扩展以显式传入 `RECEIVER_EXPORTED`。
+- Bridge 通用事件使用 `bridge.event.subscribe/unsubscribe/deliver` 内部 RPC，包含 `subscriptionId`、逐订阅递增 `eventSeq`，受既有 `sessionId/generation` 隔离，并在 destroy 时清空。
+
+## 真机诊断日志
+
+H5 使用统一前缀 `[ACB:H5]`，App 使用 `[ACB:APP]`，后接模块名（如 `Lifecycle`、`NASL`、`Shell`）。App 壳关键链为 `webview.load → bind.start → bind.retry（限频）→ bind.success → bridge.start → bridge.success → ready.flushed`；失败记录 `bind.timeout/bridge.failure/receive.dropped/evalJS.failure`，启动缓冲记录 `ready.buffered/flushed/dropped`。日志只记录动作、状态、错误码、耗时、候选数量、匹配策略、大小和脱敏标识；禁止记录完整 URL 查询/片段、完整参数/结果、Data URL、分片、扫码正文、rawFrame、token 及完整设备/会话/请求/传输 ID。logger 抛错必须被隔离。App 的 `bridgeOptions.debugLogging` 可关闭详细日志，online 生产构建默认关闭、开发/真机调试默认开启；H5 可通过 `configureDiagnostics({ enabled: false })` 关闭。问题反馈应附 `[ACB:H5]`/`[ACB:APP]` 日志、发生时间、动作与错误码，不附业务原文或敏感载荷。

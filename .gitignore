@@ -26,7 +26,7 @@ yarn-error.log*
 # Android APK private build configuration and signing materials
 /config/*/resources/
 /config/*/config.json
-/config/*/secrets/
+/config/*/secrets/*.keystore
 /android-old/
 **/*.keystore
 **/*.jks

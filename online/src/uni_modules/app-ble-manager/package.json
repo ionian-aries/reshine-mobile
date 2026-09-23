@@ -1,0 +1,36 @@
+{
+  "id": "app-ble-manager",
+  "name": "app-ble-manager",
+  "displayName": "App BLE Manager",
+  "version": "0.1.0",
+  "description": "UniApp App 级 BLE 统一生命周期、共享扫描和多设备 GATT 管理插件",
+  "keywords": ["ble", "bluetooth", "uni-app", "gatt"],
+  "engines": {
+    "HBuilderX": "^3.1.0",
+    "uni-app": "^2.0"
+  },
+  "dcloudext": {
+    "type": "sdk-js",
+    "sale": { "regular": { "price": "0.00" }, "sourcecode": { "price": "0.00" } },
+    "contact": { "qq": "" },
+    "declaration": {
+      "ads": "无",
+      "data": "插件不采集任何数据",
+      "permissions": "<uses-permission android:name=\"android.permission.BLUETOOTH\"/>\n<uses-permission android:name=\"android.permission.BLUETOOTH_ADMIN\"/>\n<uses-permission android:name=\"android.permission.BLUETOOTH_SCAN\"/>\n<uses-permission android:name=\"android.permission.BLUETOOTH_CONNECT\"/>\n<uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>\n<uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\"/>"
+    }
+  },
+  "uni_modules": {
+    "dependencies": [],
+    "encrypt": [],
+    "platforms": {
+      "cloud": { "tcb": "x", "aliyun": "x" },
+      "client": {
+        "uni-app": {
+          "vue": { "vue2": "√", "vue3": "√" },
+          "app": { "android": "√", "ios": "√" },
+          "web": { "safari": "x", "chrome": "x" }
+        }
+      }
+    }
+  }
+}

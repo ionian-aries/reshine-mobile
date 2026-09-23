@@ -12,7 +12,7 @@
     "build:app-plus": "node scripts/build-app-plus.js",
     "build:wgt": "node scripts/build-wgt.js",
     "build:apk": "node scripts/build-apk.js",
-    "test": "node --test"
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "@inquirer/prompts": "7.8.4",

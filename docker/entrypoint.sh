@@ -33,7 +33,7 @@ apksigner verify --verbose "$source_apk" >/dev/null || fail 'APK 签名验证失
 [ -n "${ANDROID_BUILDER_IMAGE:-}" ] || fail '缺少构建镜像标识'
 expected_image=$(node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync(process.argv[1]));process.stdout.write(String(c.template?.image||''))" "$INPUT_DIR/config.json") || fail '构建镜像标识读取失败'
 [ "$expected_image" = "$ANDROID_BUILDER_IMAGE" ] || fail '运行时 config 中的镜像标识与实际镜像不一致'
-artifact_name=$(node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync(process.argv[1]));const safe=v=>String(v).normalize('NFKC').replace(/[^A-Za-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'');const name=safe(c.uniapp.name),version=safe(c.uniapp.versionName);if(!name||!version)process.exit(1);process.stdout.write(name+'-'+version+'-'+c.uniapp.versionCode+'.apk')" "$INPUT_DIR/config.json") || fail 'APK 文件名生成失败'
+artifact_name=$(node -e "const fs=require('fs');const c=JSON.parse(fs.readFileSync(process.argv[1]));const safe=v=>String(v).normalize('NFKC').replace(/[^A-Za-z0-9._-]+/g,'-').replace(/^-+|-+$/g,'');const name=safe(c.uniapp.name),version=safe(c.uniapp.versionName);if(!name||!version)process.exit(1);process.stdout.write(name+'-v'+version+'.apk')" "$INPUT_DIR/config.json") || fail 'APK 文件名生成失败'
 find "$OUTPUT_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 cp "$source_apk" "$OUTPUT_DIR/$artifact_name"
 [ -s "$OUTPUT_DIR/$artifact_name" ] || fail 'APK 输出失败'

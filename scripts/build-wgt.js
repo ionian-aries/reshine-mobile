@@ -65,7 +65,7 @@ async function main() {
   await rm(target.wgtDir, { recursive: true, force: true });
   await mkdir(target.wgtDir, { recursive: true });
   const { manifest } = await buildAppPlus(target, targets[name]);
-  const wgtPath = path.join(target.wgtDir, `${manifest.appId}.wgt`);
+  const wgtPath = path.join(target.wgtDir, `${manifest.appId}-v${manifest.versionName}.wgt`);
   await assertSafePath(wgtPath, { fieldName: `${name} WGT 文件`, allowMissing: true });
   await createWgt(target.appPlusDir, wgtPath);
   await validateWgt(target.wgtDir, wgtPath, manifest);

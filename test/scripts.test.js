@@ -114,9 +114,18 @@ test('官方 simpleDemo 临时副本可注入业务配置并拒绝符号链接�
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test('APK 和 WGT 产物名使用 versionName 且不包含 versionCode', async () => {
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const entrypoint = await readFile(path.join(projectRoot, 'docker/entrypoint.sh'), 'utf8');
+  const buildWgt = await readFile(path.join(projectRoot, 'scripts/build-wgt.js'), 'utf8');
+  assert.match(entrypoint, /name\+'-v'\+version\+'\.apk'/);
+  assert.doesNotMatch(entrypoint, /versionCode\+'\.apk'/);
+  assert.match(buildWgt, /`\$\{manifest\.appId\}-v\$\{manifest\.versionName\}\.wgt`/);
+});
+
 test('Docker 输出目录只能保留一个非空 APK', async () => {
   const output = await mkdtemp(path.join(os.tmpdir(), 'reshine-output-'));
-  const apkName = 'fixture-1.2.3-7.apk';
+  const apkName = 'fixture-v1.2.3.apk';
   const apkPath = path.join(output, apkName);
   await writeFile(apkPath, 'apk');
   try {

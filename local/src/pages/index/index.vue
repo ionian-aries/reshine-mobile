@@ -1,30 +1,35 @@
 <template>
-  <view class="page">
-    <web-view :src="webviewUrl" @message="handleMessage" @error="handleError"></web-view>
+  <view class="test-page">
+    <text class="title">客户端更新联调</text>
+    <text class="description">应用启动后会自动检查更新。当前页面仅用于确认业务页面未被阻塞。</text>
   </view>
 </template>
 
 <script>
 export default {
-  data() {
-    return {
-      webviewUrl: '/hybrid/html/index.html#/index'
-    }
-  },
-  methods: {
-    handleMessage(event) {
-      this.$emit('webview-message', event.detail)
-    },
-    handleError() {
-      uni.showToast({ title: '本地页面加载失败', icon: 'none' })
-    }
-  }
+  name: 'UpgradeTestPage'
 }
 </script>
 
 <style>
-.page {
-  width: 100%;
-  height: 100%;
+.test-page {
+  padding: 96rpx 48rpx;
+}
+
+.title,
+.description {
+  display: block;
+}
+
+.title {
+  margin-bottom: 32rpx;
+  font-size: 40rpx;
+  font-weight: 600;
+}
+
+.description {
+  color: #666666;
+  font-size: 28rpx;
+  line-height: 1.7;
 }
 </style>
