@@ -1,6 +1,7 @@
 <template>
   <view class="app-capability-bridge-shell">
-    <web-view :id="webviewId" :src="resolvedSource.src" @load="handleWebViewLoaded" @message="handleWebViewMessage" @error="handleWebViewError"></web-view>
+    <view class="bridge-status-bar" :style="statusBarStyle"></view>
+    <web-view :id="webviewId" :src="resolvedSource.src" :webview-styles="webviewStyles" @load="handleWebViewLoaded" @message="handleWebViewMessage" @error="handleWebViewError"></web-view>
     <canvas :id="resolvedCanvasId" :canvas-id="resolvedCanvasId" class="bridge-hidden-canvas"></canvas>
   </view>
 </template>
@@ -8,7 +9,7 @@
 <script>
 import { createAppBridge } from '../../js_sdk/index.js'
 import { createDiagnosticLogger } from '../../js_sdk/diagnostics.js'
-import { attachRuntimeLifecycle, createShellLifecycle, createStartupReadyBuffer, getNativeWebViewId, getNativeWebViewUrl, getOwnedWebViewCandidates, getPageWebView, parseBridgeSource, resolveWebViewCandidate, waitForWebView } from '../../js_sdk/shell-runtime.js'
+import { attachRuntimeLifecycle, configureStatusBar, createShellLifecycle, createStartupReadyBuffer, getNativeWebViewId, getNativeWebViewUrl, getOwnedWebViewCandidates, getPageWebView, parseBridgeSource, resolveStatusBarHeight, resolveWebViewCandidate, waitForWebView } from '../../js_sdk/shell-runtime.js'
 
 let componentSequence = 0
 export default {
@@ -16,9 +17,13 @@ export default {
   props: { src: { type: String, required: true }, canvasId: { type: String, default: '' }, bridgeOptions: { type: Object, default: () => ({}) } },
   data() {
     const sequence = ++componentSequence
-    return { bridge: null, nativeWebview: null, startPromise: null, reloadPromise: null, lifecycle: null, detachRuntimeLifecycle: null, detachNativeLoaded: null, bindCancellation: null, bridgeGeneration: 0, startupReady: null, log: null, loadSourcesSeen: Object.create(null), lastLoadSignal: null, webviewId: `acb-webview-${sequence}`, resolvedCanvasId: this.canvasId || `acb-print-${sequence}` }
+    return { bridge: null, nativeWebview: null, startPromise: null, reloadPromise: null, lifecycle: null, detachRuntimeLifecycle: null, detachNativeLoaded: null, bindCancellation: null, bridgeGeneration: 0, startupReady: null, log: null, loadSourcesSeen: Object.create(null), lastLoadSignal: null, statusBarHeight: 0, webviewId: `acb-webview-${sequence}`, resolvedCanvasId: this.canvasId || `acb-print-${sequence}` }
   },
-  computed: { resolvedSource() { return parseBridgeSource(this.src) } },
+  computed: {
+    resolvedSource() { return parseBridgeSource(this.src) },
+    statusBarStyle() { return { height: `${this.statusBarHeight}px` } },
+    webviewStyles() { return { top: this.statusBarHeight, bottom: 0 } }
+  },
   created() {
     this.log = createDiagnosticLogger({ enabled: this.bridgeOptions.debugLogging !== false, logger: this.bridgeOptions.logger })
     this.startupReady = createStartupReadyBuffer({
@@ -29,6 +34,14 @@ export default {
       onCleared: ({ reason, count }) => this.log('Shell', 'ready.dropped', { reason, count }, 'warn')
     })
     this.lifecycle = createShellLifecycle({ hide: reason => { if (this.bridge) this.bridge.cancelScan(reason).catch(() => undefined) }, destroy: reason => this.destroyBridge(reason) })
+  },
+  beforeMount() {
+    // #ifdef APP-PLUS
+    const runtime = typeof plus !== 'undefined' ? plus : null
+    const uniRuntime = typeof uni !== 'undefined' ? uni : null
+    this.statusBarHeight = resolveStatusBarHeight(runtime, uniRuntime)
+    configureStatusBar(runtime)
+    // #endif
   },
   mounted() {
     const pageWebview = this.getPageWebView()
@@ -80,7 +93,13 @@ export default {
           this.log('Shell', 'bridge.success', { generation })
           bridge.waitUntilReady().then(() => { if (this.bridge === bridge) this.$emit('ready', bridge.getSnapshot()) }).catch(error => { if (this.bridge === bridge) this.$emit('error', error) })
         })
-        .catch(error => { if (error && error.code === 'WEBVIEW_BIND_CANCELLED') return; this.log('Shell', 'bind.result', { outcome: 'failure', code: error && error.code, attempts: error && error.attempts, elapsedMs: error && error.elapsedMs, candidateCount: error && error.candidateCount, strategy: error && error.strategy }, 'error'); this.$emit('error', error); throw error })
+        .catch(async error => {
+          if (error && error.code === 'WEBVIEW_BIND_CANCELLED') return
+          const failedBridge = this.bridge
+          this.bridge = null; this.nativeWebview = null
+          if (failedBridge) await failedBridge.destroy('start-failed').catch(() => undefined)
+          this.log('Shell', 'bind.result', { outcome: 'failure', code: error && error.code, attempts: error && error.attempts, elapsedMs: error && error.elapsedMs, candidateCount: error && error.candidateCount, strategy: error && error.strategy }, 'error'); this.$emit('error', error); throw error
+        })
         .finally(() => { if (this.bindCancellation === cancellation) this.bindCancellation = null; this.startPromise = null })
       return this.startPromise
     },
@@ -130,7 +149,6 @@ export default {
     handleHide() { this.lifecycle.hide('app-hide') },
     handleWebViewLoaded() { this.handleLoadSignal('template') },
     handleWebViewMessage(event) {
-      if (!this.lifecycle.isVisible()) { this.log('Shell', 'receive.dropped', { reason: 'hidden' }, 'warn'); return }
       const data = event && event.detail && event.detail.data
       ;(Array.isArray(data) ? data : [data]).filter(Boolean).forEach(message => { if (this.bridge) this.bridge.receive(message); else this.startupReady.push(message) })
     },
@@ -142,5 +160,6 @@ export default {
 
 <style scoped>
 .app-capability-bridge-shell { width: 100%; height: 100%; }
+.bridge-status-bar { width: 100%; background-color: transparent; }
 .bridge-hidden-canvas { position: fixed; left: -10000px; top: -10000px; width: 960px; height: 960px; opacity: 0; pointer-events: none; }
 </style>

@@ -1,5 +1,31 @@
 import { validateMessage } from './contract/validation.js'
 
+export function resolveStatusBarHeight(plusRuntime, uniRuntime) {
+  try {
+    const navigator = plusRuntime && plusRuntime.navigator
+    if (navigator && typeof navigator.isImmersedStatusbar === 'function' && !navigator.isImmersedStatusbar()) return 0
+    if (navigator && typeof navigator.getStatusbarHeight === 'function') {
+      const height = Number(navigator.getStatusbarHeight())
+      if (Number.isFinite(height) && height >= 0) return height
+    }
+  } catch (_) {}
+  try {
+    const info = uniRuntime && typeof uniRuntime.getSystemInfoSync === 'function' ? uniRuntime.getSystemInfoSync() : null
+    const height = Number(info && info.statusBarHeight)
+    return Number.isFinite(height) && height >= 0 ? height : 0
+  } catch (_) { return 0 }
+}
+
+export function configureStatusBar(plusRuntime, backgroundColor = '#00000000', style = 'dark') {
+  try {
+    const navigator = plusRuntime && plusRuntime.navigator
+    if (!navigator) return false
+    if (typeof navigator.setStatusBarBackground === 'function') navigator.setStatusBarBackground(backgroundColor)
+    if (typeof navigator.setStatusBarStyle === 'function') navigator.setStatusBarStyle(style)
+    return true
+  } catch (_) { return false }
+}
+
 export function parseBridgeSource(value) {
   const src = typeof value === 'string' ? value.trim() : ''
   if (!src) throw new Error('app-capability-bridge-shell 的 src 不能为空')

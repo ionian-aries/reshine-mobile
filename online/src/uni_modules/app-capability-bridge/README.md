@@ -23,10 +23,10 @@ Bridge Core 建立前，壳只缓存经完整协议校验和安全复制的 H5 `
 - 扫码：`scan_start`、`scan_cancel`（Honeywell DCS 广播；单活动会话；软触发可选；成功、超时、取消和异常均幂等 release/unregister；`targetSdkVersion >= 34` 或接收器注册失败返回 `unsupported/SCAN_RECEIVER_UNAVAILABLE`）
 - 蓝牙：`bluetooth_getState`、`bluetooth_enable`、`bluetooth_disable`、`bluetooth_search`
 - 电子秤：`scale_connect`、`scale_disconnect`、`scale_status`、`scale_readWeight`
-- 打印机：`printer_connect`、`printer_disconnect`、`printer_status`、`printer_print`、`printer_preview`
+- 打印机：`printer_connect`、`printer_disconnect`、`printer_status`、`printer_print`。`printer_preview` 不属于 App Bridge 能力，H5 调用会按普通未注册 action 返回既有 `METHOD_NOT_FOUND` 错误。
 
 业务 action 统一返回 `{status,code,message,data}`。适配层只通过 `app-ble-manager/js_sdk/index.js` 的公开 `ble`、`scale`、`printer` API 调用设备能力。`bluetooth_search` 订阅 `deviceFound`、按设备 ID 去重，并在 timeout 或异常时停止真实 `scanId` 且退订。
 
-当前打印支持 PNG/JPEG/WebP Data URL 或 HTTP(S) URL。完整 RPC 超过 128 KiB 的 Data URL 由桥内部使用 `transfer.start/chunk/complete/abort` 双向分片，目标片长 48 KiB，单图解码后上限 5 MiB；包含 SHA-256、有限重试、乱序及一致重复片处理、预算/并发/TTL 和一次性消费。`printer_preview` 对临时文件执行两阶段验证：输入引用仅接受无 traversal 的 `_doc/`、按策略启用的 `_downloads/` 和本机 `file://`，默认拒绝 `content://` 与裸绝对路径；解析 `FileEntry` 后通过 `plus.io.requestFileSystem` 取得可信根，用规范化绝对路径和目录边界再次校验，不用输入格式规则匹配 `entry.fullPath`。读取前检查文件大小，读取后严格验证 PNG/JPEG/WebP Data URL、规范 Base64、5 MiB 解码上限及文件头与 MIME；只有已证明处于批准根且名称可识别为本次临时图片的文件才在 `finally` 删除。结果保持旧契约 `data.image` 为 Data URL，大结果沿现有 App→H5 附件分片返回，本地路径不会返回 H5。打印以 `operationId` 在当前 session 内去重，缓存 10 分钟、最多 100 条。`printer_cancel` 不注册、不导出，也不会用断开连接伪装取消。当前平台范围为 Android App-vue。
+当前打印支持 PNG/JPEG/WebP Data URL 或 HTTP(S) URL。完整 RPC 超过 128 KiB 的 Data URL 由桥内部使用 `transfer.start/chunk/complete/abort` 单向传入 App，目标片长 48 KiB，单图解码后上限 5 MiB；包含 SHA-256、有限重试、乱序及一致重复片处理、预算/并发/TTL 和一次性消费。每个 `printer_print` 请求只调用一次 manager `printer.print(job)`；`width`、`height`、`orientation` 原样映射，`copies`、`gapType`、`threshold` 原样映射，`printDarkness`/`printSpeed` 分别映射为 manager 的 `darkness`/`speed`。`operationId` 在当前 session 内去重，缓存 10 分钟、最多 100 条。`printer_preview` 与 `printer_cancel` 均不注册、不导出，也不会以外层特殊 handler 伪造错误或能力。当前平台范围为 Android App-vue。
 
 诊断日志使用 `[ACB:APP][模块]` 前缀；H5 配套库使用 `[ACB:H5][模块]`。只反馈动作、状态、错误码、耗时、大小和脱敏 ID，不记录完整参数/结果、图片 Data URL/分片、扫码正文、rawFrame、token 或完整标识。`bridgeOptions.debugLogging=false` 可关闭 App 详细日志，logger 异常会被隔离。反馈问题时请提供发生时间、日志前缀、动作和错误码。

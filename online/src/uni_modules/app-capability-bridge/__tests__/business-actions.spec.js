@@ -1,4 +1,4 @@
-import { businessFailureData, createBusinessActions } from '../js_sdk/services/business-actions.js'
+import { businessFailureData, createBusinessActions, registerBusinessActions } from '../js_sdk/services/business-actions.js'
 import { ActionValidationError, objectParams, validateActionParams, validateImage } from '../js_sdk/services/action-validation.js'
 const validateLargeImage = () => validateImage(`data:image/png;base64,${'A'.repeat(128 * 1024)}`)
 
@@ -56,10 +56,41 @@ describe('business action adapter', () => {
     release({ overloaded: false, stable: true, rawWeight: '12.30', unit: 'kg', weightTypeMeaning: 'net', rawFrame: 'raw' })
     await expect(first).resolves.toMatchObject({ data: { overload: false, stable: true, weight: '12.30', unit: 'kg', weightType: 'net', raw: 'raw' } })
   })
-  test('passes hidden canvas and mapped print fields', async () => {
+  test.each([
+    [{ rawWeight: '-1.25' }, '-1.25'],
+    [{ rawWeight: -1.25 }, '-1.25'],
+    [{ rawWeight: '1.25', sign: '-' }, '-1.25'],
+    [{ rawWeight: '1.25', negative: true }, '-1.25'],
+    [{ rawWeight: '1.25', rawFrame: 'ST,NT,-1.25kg' }, '-1.25'],
+    [{ rawWeight: '1.25', sign: '+', rawFrame: 'ST,NT,+1.25kg' }, '1.25'],
+    [{ rawWeight: '-0', sign: '-' }, '0'],
+    [{ rawWeight: -0, sign: '-' }, '0'],
+  ])('preserves scale sign without changing the legacy string shape: %p', async (reading, expected) => {
+    const result = await createBusinessActions({ adapter: adapter({ scale: { readWeight: jest.fn(async () => ({ overloaded: false, stable: true, unit: 'kg', weightTypeMeaning: 'net', ...reading })) } }), canvasId: 'canvas-1' }).actions.scale_readWeight({ timeout: 100 })
+    expect(result.data.weight).toBe(expected)
+    expect(typeof result.data.weight).toBe('string')
+    expect(typeof result.data.raw).toBe('string')
+    expect(result.data.weight).not.toMatch(/[eE]/)
+  })
+  test('keeps invalid and contradictory fields observable without guessing or leaking raw frames', async () => {
+    const calls = []
+    const log = (...args) => calls.push(args)
+    const result = await createBusinessActions({ adapter: adapter({ scale: { readWeight: jest.fn(async () => ({ overloaded: false, stable: false, rawWeight: '-1.25', sign: '+', unit: 'kg', weightType: 'NT', status: 'unstable', rawFrame: 'ST,NT,-123456789.00kg' })) } }), canvasId: 'canvas-1', log }).actions.scale_readWeight({ timeout: 100 })
+    expect(result.data.weight).toBe('-1.25')
+    const text = JSON.stringify(calls)
+    expect(text).toContain('signConflict')
+    expect(text).toContain('rawLength')
+    expect(text).toContain('rawHash')
+    expect(text).not.toContain('ST,NT,-123456789.00kg')
+    const invalid = await createBusinessActions({ adapter: adapter({ scale: { readWeight: jest.fn(async () => ({ rawWeight: 'invalid', sign: '-', rawFrame: 'US,NT,-invalidkg' })) } }), canvasId: 'canvas-1' }).actions.scale_readWeight({ timeout: 100 })
+    expect(invalid.data.weight).toBe('invalid')
+  })
+  test('maps one 80x40/90/180 request to one manager print call', async () => {
     const print = jest.fn(async () => ({ submitted: true })); const source = adapter({ printer: { print } })
-    const result = await createBusinessActions({ adapter: source, canvasId: 'hidden-canvas' }).actions.printer_print({ image: 'https://example.com/a.png', width: 80, height: 40, orientation: 0, copies: 1, gapType: 255, printDarkness: 8, printSpeed: 3, threshold: 128 })
-    expect(result.status).toBe('success'); expect(print).toHaveBeenCalledWith(expect.objectContaining({ canvasId: 'hidden-canvas', darkness: 8, speed: 3 }))
+    const result = await createBusinessActions({ adapter: source, canvasId: 'hidden-canvas' }).actions.printer_print({ image: 'https://example.com/a.png', width: 80, height: 40, orientation: 90, copies: 1, gapType: 255, printDarkness: 8, printSpeed: 3, threshold: 180 }, { sessionId: 'session-1', generation: 1, operationId: 'print-1' })
+    expect(result.status).toBe('success')
+    expect(print).toHaveBeenCalledTimes(1)
+    expect(print).toHaveBeenCalledWith({ image: 'https://example.com/a.png', width: 80, height: 40, orientation: 90, threshold: 180, canvasId: 'hidden-canvas', copies: 1, gapType: 255, darkness: 8, speed: 3 })
   })
   test('accepts large input for transfer and omits printer_cancel', async () => {
     const service = createBusinessActions({ adapter: adapter(), canvasId: 'canvas-1' })
@@ -80,7 +111,6 @@ describe('business action adapter', () => {
     ['printer_disconnect', 'printer', 'getState', undefined],
     ['printer_status', 'printer', 'getState', undefined],
     ['printer_print', 'printer', 'print', { image: 'https://example.com/a.png', width: 80, height: 40 }],
-    ['printer_preview', 'printer', 'preview', { image: 'https://example.com/a.png', width: 80, height: 40 }],
   ])('%s converts bottom-layer rejection to its legacy envelope', async (name, domain, method, params) => {
     const rejected = { errCode: 'USER_CANCEL', errMsg: 'user cancel' }
     const source = adapter({ [domain]: { [method]: jest.fn(async () => { throw rejected }) } })
@@ -93,7 +123,7 @@ describe('business action adapter', () => {
     const scanService = { start: jest.fn(async () => { throw new Error('scanner failed') }), cancel: jest.fn(), destroy: jest.fn() }
     await expect(createBusinessActions({ adapter: adapter(), canvasId: 'canvas-1', scanService }).actions.scan_start({})).resolves.toEqual({ status: 'error', code: 'OPERATION_FAILED', message: 'scanner failed', data: businessFailureData('scan_start') })
   })
-  test.each(['bluetooth_getState', 'bluetooth_enable', 'bluetooth_disable', 'bluetooth_search', 'scale_connect', 'scale_disconnect', 'scale_status', 'scale_readWeight', 'printer_connect', 'printer_disconnect', 'printer_status', 'printer_print', 'printer_preview', 'scan_start', 'scan_cancel'])('%s has an action-specific failure data shape', name => {
+  test.each(['bluetooth_getState', 'bluetooth_enable', 'bluetooth_disable', 'bluetooth_search', 'scale_connect', 'scale_disconnect', 'scale_status', 'scale_readWeight', 'printer_connect', 'printer_disconnect', 'printer_status', 'printer_print', 'scan_start', 'scan_cancel'])('%s has an action-specific failure data shape', name => {
     expect(businessFailureData(name)).toEqual(expect.any(Object))
   })
   test('preserves scanner business cancellation and unsupported envelopes with declared data', async () => {
@@ -144,14 +174,23 @@ describe('business action adapter', () => {
     await expect(createBusinessActions({ adapter: source, canvasId: 'canvas-1' }).actions.bluetooth_enable()).rejects.toThrow('broken implementation')
     expect(source.ble.getBluetoothState).not.toHaveBeenCalled()
   })
-  test('preview action converts an absolute resolved _doc file to the legacy H5 data URL', async () => {
-    const preview = jest.fn(async () => ({ dataUrl: '_doc/uniapp_temp/canvas-preview.png' }))
-    const expected = 'data:image/png;base64,iVBORw0KGgo='
-    const entry = { fullPath: '/storage/emulated/0/Android/data/app/doc/uniapp_temp/canvas-preview.png', file: success => success({ size: 8 }), remove: success => success() }
-    const io = { PRIVATE_DOC: 1, PUBLIC_DOWNLOADS: 2, resolveLocalFileSystemURL: (_, success) => success(entry), requestFileSystem: (_, success) => success({ root: { fullPath: '/storage/emulated/0/Android/data/app/doc' } }) }
-    class FileReader { readAsDataURL() { this.onloadend({ target: { result: expected } }) } }
-    const service = createBusinessActions({ adapter: adapter({ printer: { preview } }), canvasId: 'canvas-1', previewFileOptions: { io, FileReader } })
-    await expect(service.actions.printer_preview({ image: 'https://example.com/a.png', width: 80, height: 40 })).resolves.toEqual({ status: 'success', code: 'OK', message: '', data: { image: expected } })
+  test('does not register or expose printer_preview', async () => {
+    const source = adapter()
+    const service = createBusinessActions({ adapter: source, canvasId: 'canvas-1' })
+    expect(service.actions.printer_preview).toBeUndefined()
+    const registered = new Map()
+    const bridge = { register: jest.fn((name, action) => { registered.set(name, action); return () => registered.delete(name) }) }
+    const registration = registerBusinessActions(bridge, { adapter: source, canvasId: 'canvas-1' })
+    expect(registered.has('printer_preview')).toBe(false)
+    expect(source.printer.preview).not.toHaveBeenCalled()
+    await registration.dispose()
+  })
+  test('deduplicates print only inside the same session generation', async () => {
+    const print = jest.fn(async () => undefined); const service = createBusinessActions({ adapter: adapter({ printer: { print } }), canvasId: 'canvas-1' })
+    const params = { image: 'https://example.com/a.png', width: 80, height: 40 }
+    await service.actions.printer_print(params, { sessionId: 'one', generation: 1, operationId: 'same' })
+    await service.actions.printer_print(params, { sessionId: 'two', generation: 2, operationId: 'same' })
+    expect(print).toHaveBeenCalledTimes(2)
   })
   test('deduplicates print operation and expires bounded cache', async () => {
     const print = jest.fn(async () => undefined); const service = createBusinessActions({ adapter: adapter({ printer: { print } }), canvasId: 'canvas-1', operationLimit: 2 })

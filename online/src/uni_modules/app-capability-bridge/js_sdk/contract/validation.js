@@ -1,10 +1,11 @@
 import { BridgeError, METHOD_PATTERN, PROTOCOL, VERSION } from './protocol.js'
 
-const TYPES = new Set(['ready', 'ready-ack', 'request', 'response'])
+const TYPES = new Set(['ready', 'ready-ack', 'disconnect', 'request', 'response'])
 const BASE = ['protocol', 'version', 'type', 'sender', 'sessionId', 'generation', 'messageId', 'sentAt']
 const EXTRA = {
   ready: ['capabilitiesRequested'],
   'ready-ack': ['accepted', 'capabilities', 'limits', 'error'],
+  disconnect: ['reason'],
   request: ['requestId', 'method', 'params', 'operationId'],
   response: ['requestId', 'ok', 'result', 'error']
 }
@@ -53,6 +54,8 @@ export function validateMessage(input, maxBytes = 128 * 1024) {
     if (message.sender !== 'h5' || message.generation !== 0 || !Array.isArray(message.capabilitiesRequested) || message.capabilitiesRequested.some(v => typeof v !== 'string')) fail('Invalid ready')
   } else if (message.type === 'ready-ack') {
     if (message.sender !== 'app' || message.generation < 1 || typeof message.accepted !== 'boolean' || !Array.isArray(message.capabilities) || !isPlain(message.limits)) fail('Invalid ready acknowledgement')
+  } else if (message.type === 'disconnect') {
+    if (message.sender !== 'h5' || message.generation < 1 || (message.reason !== undefined && typeof message.reason !== 'string')) fail('Invalid disconnect')
   } else if (message.type === 'request') {
     stringField(message.requestId, 'requestId')
     if (typeof message.method !== 'string' || !METHOD_PATTERN.test(message.method)) fail('Invalid request')

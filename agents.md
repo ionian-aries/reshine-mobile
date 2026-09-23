@@ -44,9 +44,9 @@
 
 - `online/` 是 Vue 2 + Vue CLI 5 的 uni-app 壳工程，App ID 为 `__UNI__EF1708F`。当前仅有启动页 `src/pages/index/index.vue`，页面使用 `<web-view>` 加载 `.env` 的 `VUE_APP_WEBVIEW_URL`；在线业务界面与交互实际运行于该网页，不在 uni-app 页面中实现。
 - 本地联调网页为仓库根目录 `demo-vue/`：Vue 2.7 + Vite 3，使用 `npm run dev -- --host 0.0.0.0` 向真机开放服务。Vite 端口会在占用时递增，因此每次启动必须以终端实际 Network URL 更新 `online/.env`，不能假定固定为 5173/5176。
-- `demo-vue/index.html` 通过普通 `<script>` 加载 `reshine_uniapp_mobile_bridege_library/dist-theme/index.js`；`src/main.js` 从全局变量 `window.ReshineUniappMobileBridegeLibrary` 取库，并安装 `UtilsLogics` 与 `UseComponents`。全局名由扩展库包名转 PascalCase 生成，包名/构建全局名/网页引用必须同步。
-- `demo-vue/src/App.vue` 从 `this.$library.reshine_uniapp_mobile_bridege_library` 读取逻辑。该注入键来自扩展库 `src/index.ts` 的 `LIBRARY_NAME`，两处必须完全一致。当前页面尝试调用 `bridge_init`，但扩展库 `src/logics/index.ts` 尚未导出该函数，因此目前只会得到 `undefined`，桥接功能尚未形成。
-- `reshine_uniapp_mobile_bridege_library/` 是 LCAP Vue 2 扩展库。`npm run watch` 执行 `lcap-scripts watch`，持续产出 `dist-theme/index.js`（UMD）和 `index.mjs`、source map、NASL 扩展描述及 API 编译结果，并在动态端口提供目录服务。`demo-vue/index.html` 当前直接写入该次服务地址；watch 服务重启或端口变化后必须同步修改。
+- `demo-vue/index.html` 通过普通 `<script>` 加载 `reshine_uniapp_mobile_bridge_library/dist-theme/index.js`；`src/main.js` 从全局变量 `window.ReshineUniappMobileBridegeLibrary` 取库，并安装 `UtilsLogics` 与 `UseComponents`。全局名由扩展库包名转 PascalCase 生成，包名/构建全局名/网页引用必须同步。
+- `demo-vue/src/App.vue` 从 `this.$library.reshine_uniapp_mobile_bridge_library` 读取逻辑。该注入键来自扩展库 `src/index.ts` 的 `LIBRARY_NAME`，两处必须完全一致。当前页面尝试调用 `bridge_init`，但扩展库 `src/logics/index.ts` 尚未导出该函数，因此目前只会得到 `undefined`，桥接功能尚未形成。
+- `reshine_uniapp_mobile_bridge_library/` 是 LCAP Vue 2 扩展库。`npm run watch` 执行 `lcap-scripts watch`，持续产出 `dist-theme/index.js`（UMD）和 `index.mjs`、source map、NASL 扩展描述及 API 编译结果，并在动态端口提供目录服务。`demo-vue/index.html` 当前直接写入该次服务地址；watch 服务重启或端口变化后必须同步修改。
 - 当前依赖传播链为：扩展库源码变更 → watch 重建 `dist-theme` → demo-vue 重新加载/热更新后使用新全局库 → online WebView 加载 demo-vue → 真机调试页呈现结果。demo-vue 自身变更只影响网页层；online 壳、权限或 uni_modules 变更需要重新编译/运行 app-plus，不能依赖网页热更新。
 - `online/src/uni_modules/` 已放入两个尚未接入应用入口和 WebView 通信链路的插件：`app-ble-manager` 与 `dothan-lpapi-ble`。前者是 App 级 BLE（低功耗蓝牙）统一生命周期管理层，导出 `ble`、`printer`、`scale`、`lifecycle`，内部统一权限、系统蓝牙、适配器会话、共享扫描、连接注册、GATT 传输、事件及关闭清理；打印机领域适配后者，电子秤领域独立实现。后者是德佟标签绘制与 BLE 打印 SDK。
 - `manifest.json` 和 Android 离线模板已声明互联网、旧版/新版蓝牙及定位兼容权限，且允许明文 HTTP，满足当前局域网开发 URL；权限存在不代表插件已接入。

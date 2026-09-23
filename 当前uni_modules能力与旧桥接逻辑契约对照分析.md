@@ -799,9 +799,19 @@ STARTED → RECEIVING → COMPLETED
 - 每片 ACK，有限重试，重复 index 必须校验内容一致。
 - transfer 必须绑定 session、direction、action 和 field。
 - 打印 messageId 必须去重，避免重试造成重复出纸。
-- 页面卸载、导航、App 隐藏策略触发、超时和错误路径均必须释放附件。
+- 页面卸载、导航、会话替换、显式 disconnect、超时和错误路径均必须释放对应 session 的附件；App 进入后台本身不释放附件或重置 session。
 
-## 8. WebView 协议与返回规范
+## 8. WebView 协议、生命周期与返回规范
+
+### 8.1 最终生命周期
+
+- App Bridge 随 App 壳建立后常驻 `listening`。H5 尚未初始化、已退出或长时间缺席均为正常状态，App 不启动 H5 缺席超时，也不因缺少 H5 进入失败态。
+- H5 按需执行 `bridge_init`；退出时单向发送尽力而为的 `disconnect` 并立即 `destroy` 本地状态，不等待 `disconnect-ack`。再次进入时创建新实例、新 session 并完整 `re-init`。
+- App 收到 disconnect、WebView reload/close、导航吊销或新 session 后执行 session reset：清该 session 的 pending、queue、订阅、附件、ACK/timer、扫描、扫码和称重等待等会话资源，保留打印机、电子秤等 BLE 设备连接，不调用全局 `lifecycle.shutdown()`。
+- App 进入后台时 Bridge 和活动 session 保持；已送达及后台送达的控制消息继续处理，不因 `onHide` 自动拒绝或销毁。协议不设置心跳、租约或离线探测。
+- App 进程终止后内存中的 Bridge、session 和 BLE 连接均不可恢复；冷启动重新建立 App Bridge 的 `listening` 状态，H5 重新 init，BLE 设备由业务重新连接。
+
+### 8.2 消息与返回
 
 普通请求至少包含：
 

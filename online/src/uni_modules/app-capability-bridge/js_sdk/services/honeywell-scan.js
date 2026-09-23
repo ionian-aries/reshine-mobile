@@ -25,6 +25,7 @@ export function createHoneywellScanService(options = {}) {
   const cleanup = current => {
     if (current.cleaned) return
     current.cleaned = true
+    if (session === current) session = null
     if (current.timer) clearTimeout(current.timer)
     current.timer = null
     if (current.soft && current.claimed) { try { broadcast(current.main, ACTION_CONTROL, bundle([['putBoolean', EXTRA_SCAN, false]])) } catch (_) {} }
@@ -32,7 +33,7 @@ export function createHoneywellScanService(options = {}) {
     if (current.registered && current.receiver) { try { android.invoke(current.main, 'unregisterReceiver', current.receiver) } catch (_) {} }
     current.registered = false; current.receiver = null; current.claimed = false
   }
-  const settle = (current, value) => { if (current.settled) return; current.settled = true; cleanup(current); if (session === current) session = null; current.resolve(value) }
+  const settle = (current, value) => { if (current.settled) return; current.settled = true; cleanup(current); current.resolve(value) }
   const failUnavailable = message => result('unsupported', 'SCAN_RECEIVER_UNAVAILABLE', message)
   function start(params = {}) {
     return new Promise(resolve => {

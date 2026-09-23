@@ -4,9 +4,9 @@
 
 ### 1.1 第四阶段大图片 Bridge 构建基线（2026-09-22）
 
-online App 与 H5 依赖库现支持打印/预览图片双向附件传输：完整 RPC 超过 128 KiB 时使用 `transfer.start/chunk/complete/abort`，目标片长 48 KiB，每阶段 3 秒、最多 3 次提交；解码后单图上限 5 MiB，session 未释放附件预算 8 MiB、H5 同时 2 个/App 全局 4 个，活动 TTL 120 秒、完成未消费 TTL 30 秒。接收端允许乱序和内容一致的重复片，拒绝冲突重复、缺片与 SHA-256 不一致，并在消费或销毁时释放。
+online App 与 H5 依赖库现支持打印图片 H5→App 附件传输：完整 RPC 超过 128 KiB 时使用 `transfer.start/chunk/complete/abort`，目标片长 48 KiB，每阶段 3 秒、最多 3 次提交；解码后单图上限 5 MiB，session 未释放附件预算 8 MiB、H5 同时 2 个/App 全局 4 个，活动 TTL 120 秒、完成未消费 TTL 30 秒。接收端允许乱序和内容一致的重复片，拒绝冲突重复、缺片与 SHA-256 不一致，并在消费或销毁时释放。
 
-`printer_preview` 的 manager 结果只允许图片 Data URL 或 `_doc/`、`_downloads/`、`file://` 沙箱临时路径；路径需规范化和读取前后限额检查，转换为 Data URL 后才可返回 H5，本地路径不得穿透 RPC。该能力属于 online App-plus 制品，Docker APK 阶段仍只封装已编译资源；发布时必须同步更新 online App 和 H5 Bridge，禁止只升级单端。
+`printer_preview` 不再属于 App Bridge 能力：online 外桥不注册、不导出、不处理该 action，H5 调用时按普通未注册 action 返回既有错误；manager 与底层预览实现保持不动。`printer_print` 每个 H5 请求只调用一次 manager `printer.print(job)`，`width/height/orientation/copies/gapType/threshold` 原样传递，`printDarkness/printSpeed` 映射到 manager 的 `darkness/speed`，`orientation=90/270` 不在外桥交换宽高。该能力属于 online App-plus 制品，Docker APK 阶段仍只封装已编译资源。
 
 本文是 `reshine-mobile` 的现行实现基准。项目包含两个 UniApp：
 
@@ -51,8 +51,9 @@ Android Docker 镜像只把已生成的 App-plus 资源封装成 APK，不安装
 
 ### 2.2 前端环境配置
 
-- `online/.env`：`VUE_APP_WEBVIEW_URL`，必须是 HTTP(S) 绝对地址。
-- `local/.env`：`VUE_APP_LOCAL_API_BASE_URL`，必须是无凭据、查询参数和片段的 HTTP(S) 绝对地址。
+- `online/.env`：`VUE_APP_WEBVIEW_URL`（HTTP(S) 绝对地址）和独立的 `VUE_APP_UPGRADE_CHECK_URL`（包含接口路径的完整更新检查 URL）。
+- `local/.env`：`VUE_APP_LOCAL_API_BASE_URL`（无凭据、查询参数和片段的 HTTP(S) 绝对地址）和独立的 `VUE_APP_UPGRADE_CHECK_URL`。
+- 更新插件不得从 WebView 地址或业务接口地址推导、拼接更新检查地址。
 - 仓库只提交 `.env.example`，真实 `.env` 不提交。
 - 这些值会编译进前端，不能保存 Token、DCloud App Key、签名密码等 Secret。
 
@@ -133,13 +134,15 @@ H5 源码不是可直接加载的网页制品；只有上述适配后的 `dist` 
 > **临时联调安全例外（2026-09-22）**：online 当前按用户要求直接使用 `VUE_APP_WEBVIEW_URL`，页面与 `app-capability-bridge-shell` 均暂不校验 URL 协议/origin，也不再传入 allowlist，因此任意配置地址可被真机 WebView 打开并获得桥接能力。此配置仅限受控真机调试；发布生产包前必须恢复 HTTP(S) 绝对 URL 校验和精确 origin allowlist，并完成恶意页面调用桥接的安全回归。Bridge 协议的消息结构、会话、代次和参数校验仍保留，但它们不能替代页面来源鉴权。
 
 - local 启动页通过同一 `app-capability-bridge-shell` 加载 `/hybrid/html/index.html#/index`；该路径按 APK 内本地资源处理，不执行 HTTP(S) origin 解析或网页来源规则。local H5 制品已包含配套依赖库导出源码；为使本地包拥有真实原生能力，`app-capability-bridge` 及其 `app-ble-manager`、`dothan-lpapi-ble` 依赖按 uni_module 自包含规则同步到 local，禁止从 sibling `online/` 目录做编译期引用。
-- online 启动页直接读取 `VUE_APP_WEBVIEW_URL` 并传给纯 JavaScript uni_module `app-capability-bridge` 的 Vue 2 壳组件。`app-capability-bridge/index.js` 导出幂等 `install(Vue)`，online/local 均在 `main.js` 通过 `Vue.use` 显式全局注册；页面不再 import 或局部声明 `components`。相较 easycom 的目录扫描与编译器隐式规则，此方案入口清晰、可单测、与现有 `app-upgrade` 安装方式一致。
+- online 启动页直接读取 `VUE_APP_WEBVIEW_URL` 并传给纯 JavaScript uni_module `app-capability-bridge` 的 Vue 2 壳组件。`app-capability-bridge/index.js` 导出幂等 `install(Vue)`，在 `main.js` 通过 `Vue.use` 显式全局注册；页面不再 import 或局部声明 `components`。页面仅保留 WebView 地址绑定，不承担配置校验、日志策略、状态栏适配或错误提示等基础设施职责：桥壳在 App-plus 启动时优先从 `plus.navigator`、失败时从 `uni.getSystemInfoSync()` 获取沉浸式状态栏高度，同时渲染单一透明占位并将同一高度传给 `<web-view>` 的 `webview-styles.top`，从原生层避让状态栏；全局 `page` 不再叠加顶部 padding，WebView 不侵占状态栏且不产生双重顶部偏移。桥壳还负责通过 `plus.navigator` 将系统状态栏背景设为 Android/HTML5 Plus 可接受的全透明色 `#00000000`，并在当前默认浅色页面背景上使用深色状态栏文字与图标。生产日志默认值由桥壳负责，WebView/桥接失败通过统一诊断日志暴露。
+- online 与 local 都自包含同一份 `app-upgrade` uni_module，并在各自 `main.js` 通过 `Vue.use` 安装。插件由 App 根生命周期自动且幂等地执行检查、下载和安装，通过原生遮罩展示强制更新状态并全局拦截返回操作，因此启动页无需放置 `<app-upgrade>`、声明升级生命周期或持有升级实例。两个应用分别编译各自的 `VUE_APP_UPGRADE_CHECK_URL`，升级包仍必须按 App ID 和版本独立发布。
 - 壳组件只在 `<web-view>` 的 `load` 事件后启动；不假设模板 HTML `id` 等于 HTML5 Plus `WebviewObject.id`，而是从页面 `children()` 过滤具备 `evalJS` 的候选，规范化在线 HTTP(S) URL 与本地/hybrid 路径后做 URL 唯一匹配。只有一个候选时可记录 `unique-fallback` 明确兜底，多候选无唯一匹配时失败且不猜测。绑定默认使用 4 秒总预算、200ms 间隔，destroy/reload 取消旧重试并以 generation 阻止迟到绑定；成功后保存明确原生对象引用。
-- 每次 WebView reload 都先取消旧绑定并幂等销毁旧 App bridge，再建立新 bridge；Bridge 建立前只缓冲最多 4 条通过完整协议校验的 `ready`，同 session 合并且不缓存业务消息，建立后顺序投递，reload/session/destroy 清理。App bridge 收到新 H5 `sessionId` 的 ready 时提升 generation、清理旧请求和订阅并确认新 session；历史 session 的迟到 ready 被拒绝，防止网页刷新后永久握手超时或回滚。
-- 壳组件 `mounted` 绑定页面原生 WebView `show/hide/close` 与 App-plus `resume/pause`；隐藏时停止当前扫码，关闭、组件销毁时完成全量幂等清理，重复解绑不产生副作用。普通 Vue/uni-app 子组件不能可靠自动收到页面 `onHide/onUnload`，所以不以组件同名 hook 代替，而由壳直接绑定运行时事件；`beforeDestroy` 作为组件树销毁兜底。
-- 当前桥接范围为 Android 第三阶段基础业务能力：在基础双端 RPC（ready/ready-ack、`bridge.ping`、`bridge.info`、双向 `register/call/await`、超时、并发乱序及 destroy）之上，已接入 `bluetooth_*`、`scale_*` 和 `printer_connect/disconnect/status/print/preview`。设备调用统一经 `app-ble-manager` 的公开 API，隐藏 canvas ID 会传入打印机连接和图像任务。
-- 本阶段不包含扫码和大图分片。打印/预览只接受不超过 128 KiB 直接传输阈值的小型 PNG/JPEG/WebP Data URL 或 HTTP(S) URL，超限返回 `LARGE_PAYLOAD_UNSUPPORTED`；`printer_cancel` 不注册、不导出。iOS 仍不属于当前完成范围。
-- 两个页面均使用自定义导航样式并显示加载错误提示。最小接入模板是 `<app-capability-bridge-shell :src="webviewUrl" />`（本地固定资源可直接写 `src="/hybrid/html/index.html#/index"`）；不声明 `ref`，也不在页面实现 `onReady/onShow/onHide/onUnload` 或手动 `destroy`。
+- App 侧 Bridge 随 App 壳建立后常驻 `listening`，等待任意后续 H5 session；H5 缺席、尚未初始化或已经销毁都不会让 App Bridge 进入连接超时或失败。每次 WebView reload 只重置旧 session：取消旧绑定代次，清理该 session 的 pending、队列、订阅、附件、扫码和称重等待等会话资源，再接受新 H5 `sessionId` 的 `ready` 并提升 generation；历史 session 的迟到消息被拒绝。Bridge 建立前只缓冲最多 4 条通过完整协议校验的 `ready`，同 session 合并且不缓存业务消息。
+- H5 按页面需要执行 `bridge_init`；退出时单向发送尽力而为的 `disconnect` 通知并立即在本地 `destroy`，再次进入时以新 session 完整 `re-init`。协议不设置 `disconnect-ack`，也不使用心跳判断 H5 存活；App 以显式 disconnect、WebView reload/close、session 替换或进程生命周期作为清理边界。
+- 壳组件 `mounted` 绑定页面原生 WebView `show/hide/close` 与 App-plus `resume/pause`。App 进入后台或页面隐藏时不销毁 Bridge、不重置 session，已送达的控制消息和执行中的控制任务继续处理；页面关闭、组件销毁或 session 替换时执行会话级幂等清理。session reset 不调用 `app-ble-manager.lifecycle.shutdown()`，并保留已建立的打印机、电子秤等 BLE 设备连接。只有 App 进程终止才丢失内存态；冷启动时重新建立 App Bridge 的 `listening` 状态，原 BLE 连接不视为可恢复，必须由业务重新连接设备。普通 Vue/uni-app 子组件不能可靠自动收到页面 `onHide/onUnload`，所以不以组件同名 hook 代替，而由壳直接绑定运行时事件；`beforeDestroy` 作为组件树销毁兜底。
+- 当前桥接范围为 Android 第三阶段基础业务能力：在基础双端 RPC（ready/ready-ack、`bridge.ping`、`bridge.info`、双向 `register/call/await`、超时、并发乱序及 destroy）之上，已接入 `bluetooth_*`、`scale_*` 和 `printer_connect/disconnect/status/print`。设备调用统一经 `app-ble-manager` 的公开 API，隐藏 canvas ID 会传入打印机连接和打印调用。
+- 打印接受 PNG/JPEG/WebP Data URL 或 HTTP(S) URL，大型 Data URL 使用 H5→App 分片。`printer_preview` 与 `printer_cancel` 都不注册、不导出；调用时沿用普通未注册 action 错误。iOS 仍不属于当前完成范围。
+- 两个页面均保持最小业务接入。online 的模板是 `<app-capability-bridge-shell :src="webviewUrl" />`，脚本只把 `VUE_APP_WEBVIEW_URL` 暴露给模板；本地固定资源可直接写 `src="/hybrid/html/index.html#/index"`。页面不声明 `ref`，也不实现桥接或升级的 `onReady/onShow/onHide/onUnload`、错误处理或手动 `destroy`。
 - local 的局域网地址允许 HTTP，因此 Android 模板显式启用明文流量；生产网络仍应优先使用 HTTPS。
 
 ## 6. 统一前端编排
@@ -284,7 +287,7 @@ output/<target>/apk/
 
 发布前还必须实际完成：
 
-1. 人工准备 `local/m` 和 `local/.env`，执行 `build:local-assets`，确认 `hybrid/html` 完整；构建失败时确认旧输出已删除并保留可排查的 `local/m/dist`。
+1. 人工准备 `local/m` 以及两个应用各自需要的真实 `.env`，执行 `build:local-assets`，确认 `hybrid/html` 完整；构建失败时确认旧输出已删除并保留可排查的 `local/m/dist`。同时确认 online/local 的 `VUE_APP_UPGRADE_CHECK_URL` 均为各自完整 HTTPS 更新检查接口。
 2. 分别构建 online/local App-plus，确认 local 包含 H5，online 不包含 local H5。
 3. 分别构建 WGT，解包确认身份、版本和 local 静态资源完整。
 4. 构建 r6 镜像，再分别构建 APK；检查最终 Android Manifest 权限、APK 签名有效性和 App-plus 资源。

@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#073c33">
+  <meta name="description" content="金川瑞翔在线版 Android 应用下载页">
+  <title>金川瑞翔在线版 · Android 下载</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #15332e;
+      --muted: #60736f;
+      --paper: #f4f0e7;
+      --card: rgba(255, 255, 255, .88);
+      --green: #087863;
+      --green-deep: #055546;
+      --line: rgba(21, 51, 46, .13);
+      --amber: #ad6517;
+      --shadow: 0 24px 70px rgba(4, 48, 40, .16);
+    }
+    * { box-sizing: border-box; }
+    html { min-height: 100%; background: #dfeae4; }
+    body {
+      min-height: 100vh;
+      min-height: 100dvh;
+      margin: 0;
+      padding: max(24px, env(safe-area-inset-top)) 18px max(30px, env(safe-area-inset-bottom));
+      display: grid;
+      place-items: center;
+      color: var(--ink);
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at 12% 8%, rgba(255,255,255,.92) 0 8%, transparent 29%),
+        radial-gradient(circle at 92% 88%, rgba(8,120,99,.17), transparent 34%),
+        linear-gradient(145deg, #edf1ea, #dbe7df);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: .22;
+      background-image: repeating-linear-gradient(120deg, transparent 0 22px, rgba(8,120,99,.08) 23px);
+      mask-image: linear-gradient(to bottom, #000, transparent 72%);
+    }
+    .page { width: min(100%, 560px); position: relative; }
+    .eyebrow {
+      margin: 0 0 12px;
+      color: var(--green-deep);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    .card {
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,.8);
+      border-radius: 28px;
+      background: var(--card);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+    .hero { padding: 28px 26px 24px; }
+    .app-head { display: flex; gap: 18px; align-items: center; }
+    .app-icon {
+      flex: 0 0 72px;
+      width: 72px;
+      height: 72px;
+      display: grid;
+      place-items: center;
+      border-radius: 21px;
+      color: white;
+      background: linear-gradient(145deg, #0b8e75, #044a3f);
+      box-shadow: inset 0 1px rgba(255,255,255,.35), 0 12px 24px rgba(8,120,99,.25);
+      font: 700 30px/1 Georgia, serif;
+    }
+    h1 { margin: 0 0 8px; font: 700 clamp(25px, 7vw, 34px)/1.15 Georgia, "Songti SC", serif; letter-spacing: -.03em; }
+    .meta { display: flex; flex-wrap: wrap; gap: 7px 12px; color: var(--muted); font-size: 13px; }
+    .meta span { display: inline-flex; align-items: center; gap: 5px; }
+    .meta span::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: #42a891; }
+    .summary { margin: 23px 0 20px; color: #435c57; font-size: 15px; line-height: 1.75; }
+    .download {
+      width: 100%;
+      min-height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      border: 0;
+      border-radius: 16px;
+      color: white;
+      background: var(--green);
+      box-shadow: 0 12px 25px rgba(8,120,99,.24);
+      font-size: 17px;
+      font-weight: 800;
+      text-decoration: none;
+      transition: transform .18s, background .18s, box-shadow .18s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .download:hover { background: var(--green-deep); box-shadow: 0 15px 29px rgba(8,120,99,.3); transform: translateY(-1px); }
+    .download:active { transform: translateY(1px); }
+    .download svg { width: 22px; height: 22px; }
+    .secondary {
+      width: 100%;
+      min-height: 46px;
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      color: var(--green-deep);
+      background: rgba(255,255,255,.66);
+      font: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .secondary:active { background: #eef5f1; }
+    .status { min-height: 20px; margin: 12px 2px 0; color: var(--muted); font-size: 12px; line-height: 1.55; text-align: center; }
+    .status.error { color: #a23d2d; }
+    .details { padding: 23px 26px 27px; border-top: 1px solid var(--line); background: rgba(247,248,243,.62); }
+    h2 { margin: 0 0 15px; font-size: 15px; letter-spacing: .02em; }
+    ol { list-style: none; margin: 0; padding: 0; counter-reset: step; }
+    li { position: relative; min-height: 34px; padding: 3px 0 13px 42px; color: #4a615c; font-size: 13px; line-height: 1.55; counter-increment: step; }
+    li::before {
+      content: counter(step);
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(8,120,99,.24);
+      border-radius: 50%;
+      color: var(--green);
+      background: #fff;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .notice { margin-top: 12px; padding: 13px 14px; border-left: 3px solid #d49643; border-radius: 4px 10px 10px 4px; color: #74522c; background: #fff7e9; font-size: 12px; line-height: 1.65; }
+    .foot { margin: 15px 0 0; color: rgba(21,51,46,.62); font-size: 11px; text-align: center; }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: max(26px, env(safe-area-inset-bottom));
+      z-index: 10;
+      padding: 10px 16px;
+      border-radius: 99px;
+      color: #fff;
+      background: rgba(10,38,33,.92);
+      font-size: 13px;
+      transform: translate(-50%, 16px);
+      opacity: 0;
+      pointer-events: none;
+      transition: .22s ease;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    @media (max-width: 380px) {
+      body { padding-inline: 12px; }
+      .hero, .details { padding-inline: 20px; }
+      .app-icon { flex-basis: 62px; width: 62px; height: 62px; border-radius: 18px; }
+    }
+    @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <p class="eyebrow">Android 应用分发</p>
+    <section class="card" aria-labelledby="app-title">
+      <div class="hero">
+        <div class="app-head">
+          <div class="app-icon" aria-hidden="true">瑞</div>
+          <div>
+            <h1 id="app-title">金川瑞翔在线版</h1>
+            <div class="meta">
+              <span>版本 1.0.0</span>
+              <span>Android</span>
+              <span id="file-size">大小检测中…</span>
+            </div>
+          </div>
+        </div>
+        <p class="summary">适用于 Android 手机和平板。请使用手机浏览器直接下载，并在下载完成后按系统提示安装。</p>
+        <a class="download" id="download-btn" href="./reshine-mobile-online-v1.0.0.apk" download="reshine-mobile-online-v1.0.0.apk">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 20h14" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          下载 APK 安装包
+        </a>
+        <button class="secondary" id="copy-btn" type="button">复制下载链接</button>
+        <p class="status" id="status" role="status" aria-live="polite">建议使用 Chrome、Edge 或手机系统浏览器下载</p>
+      </div>
+      <div class="details">
+        <h2>Android 安装说明</h2>
+        <ol>
+          <li>点击上方按钮，等待 APK 安装包下载完成。</li>
+          <li>打开下载记录中的安装包；如系统询问，请允许浏览器“安装未知应用”。</li>
+          <li>核对应用名称后完成安装。安装成功后可关闭该项临时授权。</li>
+        </ol>
+        <div class="notice"><strong>安全提示：</strong>请仅从可信地址下载。Android 可能提示该文件类型存在风险，这是安装非应用商店 APK 时的常规提醒；请确认页面来源和文件名正确后再继续。</div>
+      </div>
+    </section>
+    <p class="foot">文件：reshine-mobile-online-v1.0.0.apk</p>
+  </main>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script>
+    (function () {
+      'use strict';
+      var fileName = 'reshine-mobile-online-v1.0.0.apk';
+      var encodedPath = './' + encodeURIComponent(fileName);
+      var downloadBtn = document.getElementById('download-btn');
+      var copyBtn = document.getElementById('copy-btn');
+      var sizeEl = document.getElementById('file-size');
+      var statusEl = document.getElementById('status');
+      var toast = document.getElementById('toast');
+      var toastTimer;
+
+      downloadBtn.setAttribute('href', encodedPath);
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () { toast.classList.remove('show'); }, 2200);
+      }
+
+      function humanSize(bytes) {
+        if (!Number.isFinite(bytes) || bytes <= 0) return null;
+        var units = ['B', 'KB', 'MB', 'GB'];
+        var index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+        return (bytes / Math.pow(1024, index)).toFixed(index > 1 ? 1 : 0) + ' ' + units[index];
+      }
+
+      function absoluteDownloadUrl() {
+        return new URL(encodedPath, window.location.href).href;
+      }
+
+      if (window.location.protocol === 'file:') {
+        sizeEl.textContent = 'APK 安装包';
+        statusEl.textContent = '当前为本地文件模式，请先用 live-server 启动本目录，再通过 http 地址访问。';
+        statusEl.classList.add('error');
+        downloadBtn.addEventListener('click', function (event) {
+          event.preventDefault();
+          showToast('请通过 live-server 提供的 HTTP 地址打开此页面');
+        });
+      } else {
+        fetch(encodedPath, { method: 'HEAD', cache: 'no-store' })
+          .then(function (response) {
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            var label = humanSize(Number(response.headers.get('content-length')));
+            sizeEl.textContent = label || 'APK 安装包';
+          })
+          .catch(function () { sizeEl.textContent = 'APK 安装包'; });
+
+        downloadBtn.addEventListener('click', function () {
+          statusEl.textContent = '下载已请求；若浏览器没有反应，请检查下载权限或长按按钮打开链接。';
+          setTimeout(function () {
+            if (!document.hidden) showToast('未开始下载？请检查浏览器下载权限');
+          }, 3200);
+        });
+      }
+
+      copyBtn.addEventListener('click', function () {
+        var url = absoluteDownloadUrl();
+        var fallback = function () {
+          var input = document.createElement('textarea');
+          input.value = url;
+          input.setAttribute('readonly', '');
+          input.style.position = 'fixed';
+          input.style.opacity = '0';
+          document.body.appendChild(input);
+          input.select();
+          try {
+            document.execCommand('copy') ? showToast('下载链接已复制') : showToast('复制失败，请长按下载按钮复制链接');
+          } catch (error) {
+            showToast('复制失败，请长按下载按钮复制链接');
+          }
+          document.body.removeChild(input);
+        };
+        if (navigator.clipboard && window.isSecureContext) {
+          navigator.clipboard.writeText(url).then(function () { showToast('下载链接已复制'); }).catch(fallback);
+        } else {
+          fallback();
+        }
+      });
+    }());
+  </script>
+</body>
+</html>

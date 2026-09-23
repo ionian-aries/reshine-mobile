@@ -4,9 +4,9 @@ unpackage/
 dist/
 
 # Frontend environment files: only examples are versioned
-.env
-.env.*
-!.env.example
+# .env
+# .env.*
+# !.env.example
 
 # Log files
 npm-debug.log*
@@ -24,24 +24,13 @@ yarn-error.log*
 *.sw*
 
 # Android APK private build configuration and signing materials
-/config/*/resources/
-/config/*/config.json
-/config/*/secrets/*.keystore
-/android-old/
-**/*.keystore
+# /config/*/resources/
+# /config/*/config.json
+# /config/*/secrets/*.keystore
 **/*.jks
 **/*.p12
 **/*.pfx
-!/android-project/simpleDemo/test.jks
 
 # Android APK build outputs
 /output/
-/local/m/
-/local/src/hybrid/html/
 
-# Android template generated state
-/android-project/.gradle/
-/android-project/**/build/
-/android-project/local.properties
-/android-project/.idea/
-/android-project/**/*.iml

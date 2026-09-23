@@ -5,19 +5,34 @@ import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
 import { prepareProject } from '../docker/prepare-project.js';
-import { validateApkConfig, validateDockerOutput, createDockerRunArgs } from '../scripts/build-apk.js';
+import { validateApkConfig, validateApkStaticInputs, validateDockerOutput, createDockerRunArgs } from '../scripts/build-apk.js';
 import { assertSafePath } from '../scripts/utils/config.js';
 import { parseManifest } from '../scripts/utils/manifest.js';
 import { parseSingleTarget } from '../scripts/utils/targets.js';
 import { createDockerBuildArgs } from '../scripts/build-image.js';
 import { applyLocalSourcePatches, parseEnv, validateLocalApiBaseUrl, validateLocalDistIndex } from '../scripts/build-local-assets.js';
 import { validateAppPlusOutput } from '../scripts/build-app-plus.js';
+import { createStageTimer } from '../scripts/utils/timing.js';
 import { calculateVersion } from '../scripts/update-version.js';
 
 test('单目标参数只接受 --target', () => {
   assert.equal(parseSingleTarget(['--target', 'online'], ['online', 'local']), 'online');
   assert.throws(() => parseSingleTarget(['--targets', 'online'], ['online']), /仅支持参数 --target/);
   assert.throws(() => parseSingleTarget(['--target', 'missing'], ['online']), /未知项目/);
+});
+
+test('分阶段计时在失败时输出阶段和总耗时', async () => {
+  const logs = [];
+  let now = 1000;
+  const timer = createStageTimer('fixture', { now: () => now, log: (line) => logs.push(line) });
+  await assert.rejects(timer.stage('失败阶段', async () => { now = 2500; throw new Error('boom'); }), /boom/);
+  now = 3000;
+  timer.finish(false);
+  assert.deepEqual(logs, [
+    '[fixture] 阶段开始：失败阶段',
+    '[fixture] 阶段失败：失败阶段（1.5 s）',
+    '[fixture] 总耗时：2.0 s（失败）'
+  ]);
 });
 
 test('版本升级支持 patch、minor 和 major 且 versionCode 始终加一', () => {
@@ -42,13 +57,29 @@ test('镜像构建参数使用配置中的唯一镜像引用', () => {
   assert.throws(() => createDockerBuildArgs('  '), /apk.image/);
 });
 
-test('APK 容器参数固定平台、断网并只读挂载输入', () => {
-  const args = createDockerRunArgs('builder:test', '/safe/input', '/safe/output');
+test('APK 容器参数直接传递 macOS 中文空格路径且不含字面引号', () => {
+  const input = '/Users/测试用户/构建 输入';
+  const output = '/Users/测试用户/构建 输出';
+  const args = createDockerRunArgs('builder:test', input, output);
   assert.ok(args.includes('--platform=linux/amd64'));
   assert.ok(args.includes('--network=none'));
-  assert.ok(args.includes('type=bind,src=/safe/input,dst=/input,readonly'));
-  assert.ok(args.includes('type=bind,src=/safe/output,dst=/output'));
+  assert.ok(args.includes(`type=bind,src=${input},dst=/input,readonly`));
+  assert.ok(args.includes(`type=bind,src=${output},dst=/output`));
+  assert.ok(args.filter((arg) => arg.startsWith('type=bind,')).every((arg) => !arg.includes('"')));
   assert.deepEqual(args.slice(-1), ['builder:test']);
+});
+
+test('APK 容器参数直接传递 Windows 盘符、空格和中文路径', () => {
+  const input = 'C:\\项目 文件\\构建输入';
+  const output = 'D:\\发布目录\\构建 输出';
+  const args = createDockerRunArgs('builder:test', input, output);
+  assert.ok(args.includes(`type=bind,src=${input},dst=/input,readonly`));
+  assert.ok(args.includes(`type=bind,src=${output},dst=/output`));
+});
+
+test('APK 容器参数在启动 Docker 前拒绝含逗号路径', () => {
+  assert.throws(() => createDockerRunArgs('builder:test', '/safe/in,put', '/safe/output'), /输入路径.*逗号/);
+  assert.throws(() => createDockerRunArgs('builder:test', '/safe/input', 'C:\\输出,目录'), /输出路径.*逗号/);
 });
 
 test('JSONC 注释不会破坏字符串且校验顶层版本', () => {
@@ -123,6 +154,19 @@ test('APK 和 WGT 产物名使用 versionName 且不包含 versionCode', async (
   assert.match(buildWgt, /`\$\{manifest\.appId\}-v\$\{manifest\.versionName\}\.wgt`/);
 });
 
+test('APK 静态输入在构建前校验 keystore 与 override 白名单', async () => {
+  const root = await mkdtemp(path.join(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), '.apk-static-'));
+  const config = { android: { signing: { storeFile: 'secrets/release.jks' } } };
+  try {
+    await mkdir(path.join(root, 'secrets'), { recursive: true });
+    await assert.rejects(validateApkStaticInputs(root, config), /keystore.*不存在/);
+    await writeFile(path.join(root, 'secrets/release.jks'), 'key');
+    await mkdir(path.join(root, 'override/simpleDemo'), { recursive: true });
+    await writeFile(path.join(root, 'override/simpleDemo/bad.txt'), 'bad');
+    await assert.rejects(validateApkStaticInputs(root, config), /不在白名单/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test('Docker 输出目录只能保留一个非空 APK', async () => {
   const output = await mkdtemp(path.join(os.tmpdir(), 'reshine-output-'));
   const apkName = 'fixture-v1.2.3.apk';
@@ -169,10 +213,19 @@ test('App-plus 输出必须匹配 App ID 和版本', async () => {
   } finally { await rm(output, { recursive: true, force: true }); }
 });
 
-test('Android 模板只声明业务必需的网络与分版本 BLE 权限', async () => {
+test('online App 启用 Bluetooth 模块且 Android 模板只声明业务必需权限', async () => {
   const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const sourceManifest = parseManifest(await readFile(path.join(projectRoot, 'online/src/manifest.json'), 'utf8'));
+  assert.deepEqual(sourceManifest.value['app-plus'].modules.Bluetooth, {});
+  const sourcePermissions = sourceManifest.value['app-plus'].distribute.android.permissions.join('\n');
+  for (const permission of ['INTERNET', 'REQUEST_INSTALL_PACKAGES', 'BLUETOOTH', 'BLUETOOTH_ADMIN', 'BLUETOOTH_SCAN', 'BLUETOOTH_CONNECT', 'ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION']) {
+    assert.match(sourcePermissions, new RegExp(`android\\.permission\\.${permission}`));
+  }
+  assert.doesNotMatch(sourcePermissions, /android\.permission\.CAMERA/);
+  assert.match(sourcePermissions, /android\.hardware\.bluetooth_le/);
+
   const manifest = await readFile(path.join(projectRoot, 'android-project/simpleDemo/src/main/AndroidManifest.xml'), 'utf8');
-  for (const permission of ['INTERNET', 'BLUETOOTH', 'BLUETOOTH_ADMIN', 'BLUETOOTH_SCAN', 'BLUETOOTH_CONNECT', 'ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION']) {
+  for (const permission of ['INTERNET', 'REQUEST_INSTALL_PACKAGES', 'BLUETOOTH', 'BLUETOOTH_ADMIN', 'BLUETOOTH_SCAN', 'BLUETOOTH_CONNECT', 'ACCESS_COARSE_LOCATION', 'ACCESS_FINE_LOCATION']) {
     assert.match(manifest, new RegExp(`android\\.permission\\.${permission}`));
   }
   for (const permission of ['CAMERA', 'RECORD_AUDIO', 'VIBRATE', 'WAKE_LOCK', 'ACCESS_WIFI_STATE', 'CHANGE_NETWORK_STATE', 'CHANGE_WIFI_STATE', 'FLASHLIGHT']) {

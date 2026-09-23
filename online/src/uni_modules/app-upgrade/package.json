@@ -1,0 +1,10 @@
+{
+  "id": "app-upgrade",
+  "displayName": "App Upgrade",
+  "version": "1.0.0",
+  "description": "Android APK and WGT upgrade JavaScript SDK",
+  "keywords": ["upgrade", "android", "apk", "wgt"],
+  "dcloudext": {
+    "category": ["JS SDK", "通用 SDK"]
+  }
+}

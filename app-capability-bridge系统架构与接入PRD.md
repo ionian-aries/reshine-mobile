@@ -5,7 +5,7 @@
 > 目标插件：`app-capability-bridge`（纯 JavaScript `uni_module`）  
 > 协议名称：`app-capability-bridge`  
 > 协议版本：`1`  
-> 更新日期：2026-09-22
+> 更新日期：2026-09-23
 
 ## 1. 文档目的
 
@@ -37,7 +37,7 @@ H5 公开逻辑
 → H5 Promise 回调
 ```
 
-旧系统还实现了打印图片 H5→App、预览图片 App→H5 的内存分片，并积累了蓝牙搜索、打印参数、扫码、电子秤及兼容返回结构等业务经验。
+旧系统还实现了打印图片 H5→App、预览图片 App→H5 的内存分片，并积累了蓝牙搜索、打印参数、扫码、电子秤及兼容返回结构等业务经验；当前 App Bridge 只保留打印输入链路，预览不再属于 App Bridge 能力。
 
 当前项目已有 `app-ble-manager`，它是 BLE、打印机和电子秤能力的统一领域入口，也是 BLE 生命周期唯一所有者。打印 SDK Dothan 已被封装在 manager 内部，外层不得直接调用。
 
@@ -52,7 +52,7 @@ H5 公开逻辑
 5. 没有公开 `bridge_destroy`，页面只靠全局 `pagehide/beforeunload` 做部分清理。
 6. 事件只有单 handler，没有订阅 token、取消订阅、序号和会话恢复。
 7. `scale_status` 曾存在 H5 已公开、App 未注册的契约断链。
-8. `printer_preview.code` 的 NASL 声明与运行值不一致。
+8. 历史 `printer_preview` 外层能力已移除，不能继续出现在 App registry 或能力协商中。
 9. 双向分片协议不对称，缺少 SHA-256、完整的 complete、会话/业务字段绑定和严格总预算。
 10. H5 接收重复分片时没有可靠拒绝“同 index 不同内容”。
 11. 大循环逐片处理没有明确异步让出主线程策略，可能影响 WebView 响应。
@@ -83,7 +83,7 @@ H5 公开逻辑
 
 - `rpc/uniapp/src/pages/index/index.vue` 启动的是 `local-rpc-server`，WebView 消息只用于发现本地 HTTP RPC 服务；`rpc/vue-project/src/App.vue` 使用 `local-rpc-bridge.js`。这套 MVP **没有接入 `rpc-bridge` Core**。
 - `online-explore` 的 `uni-webview-rpc` 是一个 RPC 接入原型，展示了 `createWebViewRpc()`、启动 ready 缓冲、App/H5 echo，但不是目标业务桥。
-- 上述 MVP/原型没有实现打印大图片双向分片、preview 临时文件转换、完整 action 兼容、origin 导航安全和业务 schema。
+- 上述 MVP/原型没有实现打印大图片输入分片、完整 action 兼容、origin 导航安全和业务 schema。
 - 资料只明确了 Android 场景或 Android 风格实现，尚无目标 Android 运行矩阵的完整真机证据。
 
 因此不能宣称“现有 MVP 已支持完整 RPC、分片和目标 Android 业务闭环”。
@@ -110,7 +110,7 @@ H5 公开逻辑
 2. 100 个双向并发请求乱序完成时无 ID 错配、会话串台和 Promise 重复完成。
 3. 页面重复进入、退出、刷新、BFCache 恢复后不存在旧 receiver、timer、pending、订阅或附件泄漏。
 4. 旧 H5 能力除 `printer_cancel` 外尽量保持函数签名、参数顺序、返回 envelope 和业务语义。
-5. 打印与预览的大图片在目标 Android 真机稳定传输，不阻塞 UI，不因协议重试重复出纸。
+5. 打印大图片在目标 Android 真机稳定传输，不阻塞 UI，不因协议重试重复出纸。
 6. 非受信任 origin、导航后的页面、非法 action、非法 schema、错误协议版本和旧 session 无法调用原生能力。
 7. 页面接入仅需壳组件、URL 和一个生命周期 mixin/工厂，不要求业务页面复制 WebView、canvas、router 与清理代码。
 
@@ -209,7 +209,6 @@ online/src/uni_modules/app-capability-bridge/
     ├── services/
     │   ├── scan.js
     │   ├── transfer.js
-    │   ├── preview-file.js
     │   └── observability.js
     ├── adapters/
     │   ├── ble.js
@@ -285,8 +284,8 @@ interface BridgeCore {
 ### 7.3 注册与调用
 
 - `register()` 禁止覆盖同名方法，返回幂等注销函数；双方公共实例都暴露相同的 `register/call/waitUntilReady/destroy` 语义，App 可通过壳组件 `call()` 主动调用 H5 已注册方法并 `await`。
-- `call()` 在 `idle/starting/connecting` 可进入 queue，在 `ready` 直接发送，在 `failed/destroying/destroyed` 立即拒绝；默认业务 timeout 15 秒，调用方可在 action schema 允许范围内覆盖。
-- `call()` 的 timeout 从调用创建时开始，包含排队和握手等待时间；`waitUntilReady()` 仅等待连接，不创建业务 request。
+- H5 的 `call()` 在 `idle/initializing` 可进入 queue，在 `ready` 直接发送，在 `disconnecting/destroyed` 立即拒绝；默认业务 timeout 15 秒，调用方可在 action schema 允许范围内覆盖。App 只有存在活动 session 时才能发起面向 H5 的 `call()`；`listening` 状态下立即返回无活动 session，不等待 H5 出现。
+- H5 `call()` 的 timeout 从调用创建时开始，包含排队和握手等待时间；`waitUntilReady()` 仅等待当前 H5 初始化，不改变 App 常驻状态，也不为 App 建立 H5 缺席超时。
 - 发送前必须先登记 pending；`transport.send()` 成功只表示已提交到 WebView 通道，不表示对端收到或执行。
 - request 不做 Core 自动重试；超时不代表远端没有执行。
 - 打印等副作用 action 另外使用 `operationId` 去重。
@@ -428,7 +427,7 @@ interface TransferStart extends MessageBase {
   type: 'transfer.start';
   transferId: string;
   direction: 'h5-to-app' | 'app-to-h5';
-  action: 'printer_print' | 'printer_preview';
+  action: 'printer_print';
   field: 'image';
   contentType: 'image/png' | 'image/jpeg' | 'image/webp';
   encoding: 'base64';
@@ -482,22 +481,22 @@ interface TransferAbort extends MessageBase {
 
 ## 9. 状态机、会话和防串台
 
-### 9.1 Core 状态
+### 9.1 双端状态
+
+App 与 H5 使用不同生命周期状态机：
 
 ```text
-idle → starting → connecting → ready
-          ↘ failed       ↘ failed
-任意非 destroyed 状态 → destroying → destroyed
+App: starting → listening ⇄ session-active
+                  ↘ process-destroyed
+H5: idle → initializing → ready → disconnecting → destroyed
+                                      └→ re-init（新实例、新 session）
 ```
 
-- `idle`：已构造但未 start；
-- `starting`：transport/receiver 准备中；
-- `connecting`：等待 ready/ack；
-- `ready`：可发送业务消息；
-- `failed`：不可恢复终态；
-- `destroying/destroyed`：清理中/已释放。
-
-所有迁移通过单一 `transition()`，非法迁移记录错误并拒绝。
+- App Bridge 随 App 壳创建，注册 transport、receiver 和 action adapter 后进入常驻 `listening`；没有 H5、H5 尚未 init 或 H5 已 destroy 都是正常状态，App 不启动“等待 H5”的连接超时，也不进入失败态。
+- 合法 `ready` 到达后 App 建立 `session-active`；session reset 后清理会话资源并返回 `listening`，无需销毁并重建 App Bridge。
+- H5 只在业务页面需要原生能力时 `bridge_init`；退出时单向发送尽力而为的 `disconnect`，随后立即完成本地 `destroy`，不得等待 App 回执。再次进入时创建新实例和新 session，完整 `re-init`。
+- 协议不定义 `disconnect-ack`，也不使用心跳、租约或“H5 缺席超时”判断存活。App 仅以显式 `disconnect`、WebView reload/close、导航吊销、session 替换或 App 进程终止作为边界。
+- `failed` 仅表示 transport 初始化、协议安全或内部不可恢复错误；H5 缺席不属于错误。
 
 ### 9.2 Session 与 generation
 
@@ -541,19 +540,22 @@ queueEntries: Map<requestId, QueuedRequest>
 
 ### 10.1 公开生命周期
 
-H5 LCAP 依赖库新增并公开：
+H5 LCAP 依赖库保持历史身份 `reshine-uniapp-mobile-bridege-library`，当前发布版本为 `0.0.40`；`package.json`、`nasl.extension.json`、`manifest`、发布压缩包路径和身份回归脚本必须使用同一名称与版本。依赖库新增并公开：
 
 ```ts
-bridge_init(options?): Promise<BridgeState>
-bridge_destroy(ownerToken?): Promise<{ destroyed: boolean; remainingOwners: number }>
+bridge_init(sdkUrl?: String, timeout?: Integer): Promise<BridgeState>
+bridge_destroy(ownerToken?: String): Promise<{ destroyed: boolean; remainingOwners: number }>
 ```
 
-业务能力逻辑在调用前执行 `ensureBridge()`，因此业务方即使漏掉显式 init 也不会直接失败；但页面仍必须显式绑定进入/退出：
+`bridge_init` 必须保持旧版公开参数顺序和类型，owner 管理属于库内生命周期实现，不得把 options 对象暴露为新的 NASL 入参。
 
-- 页面进入：`bridge_init({ ownerToken })`；
-- 页面退出：`bridge_destroy(ownerToken)`。
+业务能力逻辑在调用前执行 `ensureBridge()`，因此业务方即使漏掉显式 init 也不会直接失败；页面生命周期固定为：
 
-“自动确保初始化”只保证健壮性，不替代显式页面生命周期。
+- 页面进入或首次需要能力：按兼容公开签名调用 `bridge_init(sdkUrl?, timeout?)`，库内登记固定 `legacy-owner`；
+- 页面退出：调用 `bridge_destroy(ownerToken)`；最后一个 owner 退出时，H5 向 App 单向发送尽力而为的 `disconnect`，不等待 ACK，然后立即清理本地 pending、queue、订阅、附件、receiver、timer 和 SDK 所有权；
+- 页面再次进入：创建新 bridge 实例和新 `sessionId`，完整执行 `re-init`，不得复活 destroyed 实例或复用旧 session。
+
+“自动确保初始化”只保证健壮性，不替代显式页面生命周期。`disconnect` 是单向会话结束通知，不定义 `disconnect-ack`；页面卸载时即使消息未送达，App 仍可在 WebView close/reload 或后续 session 替换时完成同一会话清理。双方均不使用心跳判断存活。
 
 ### 10.2 owner token 与引用计数
 
@@ -663,7 +665,7 @@ export default {
 </script>
 ```
 
-桥壳在 `mounted` 后的下一渲染节拍即主动执行同一套有界 WebView 绑定与 Bridge 启动流程，不再依赖模板 `load` 事件；模板 `load` 和可用时原生 WebView `loaded` 仅作为补充/导航重载信号。mounted/load 并发复用 singleflight，首次迟到 load 不重建已成功 Bridge，后续真实 reload 才销毁旧实例并重建；原生监听在 reload/destroy 时按身份解绑。绑定仍从页面原生 `children()` 中过滤具备 `evalJS` 的候选；不假设模板 HTML `id` 等于 HTML5 Plus `WebviewObject.id`。runtime 规范化候选 `getURL()/url/src` 与配置 `src`：在线地址按规范化 HTTP(S) URL 匹配，本地地址兼容 `file://`、`www/_www` 与 `/hybrid/...` 路径。URL 唯一命中时绑定；只有一个候选时允许记录策略后明确兜底；多候选无唯一命中或多重命中均失败，不取 `[0]`。默认总等待 4 秒、间隔 200ms，重试日志限频；destroy/reload 取消旧重试，generation 阻止迟到完成。绑定成功后保存明确原生对象引用并立即按顺序 flush 最多 4 条合法 ready。模板事件处理器使用 `handleWebViewLoaded`、`handleWebViewMessage`、`handleWebViewError`，避免 `onLoad`、`onError` 等 uni-app 保留生命周期名。页面无需 `ref`、`onShow`、`onHide`、`onUnload` 或手动 `destroy`。
+桥壳在 `mounted` 后的下一渲染节拍即主动执行同一套有界 WebView 绑定与 Bridge 启动流程，不再依赖模板 `load` 事件；模板 `load` 和可用时原生 WebView `loaded` 仅作为补充/导航重载信号。mounted/load 并发复用 singleflight，首次迟到 load 不重建已成功 Bridge，后续真实 reload 只 reset 旧 session 并重新绑定同一常驻 App Bridge；原生监听在 reload 或 App 壳最终 destroy 时按身份解绑。绑定仍从页面原生 `children()` 中过滤具备 `evalJS` 的候选；不假设模板 HTML `id` 等于 HTML5 Plus `WebviewObject.id`。runtime 规范化候选 `getURL()/url/src` 与配置 `src`：在线地址按规范化 HTTP(S) URL 匹配，本地地址兼容 `file://`、`www/_www` 与 `/hybrid/...` 路径。URL 唯一命中时绑定；只有一个候选时允许记录策略后明确兜底；多候选无唯一命中或多重命中均失败，不取 `[0]`。默认总等待 4 秒、间隔 200ms，重试日志限频；reload 取消旧绑定重试并以 generation 阻止迟到完成，App 壳最终 destroy 才释放 Bridge。绑定成功后保存明确原生对象引用并立即按顺序 flush 最多 4 条合法 ready。模板事件处理器使用 `handleWebViewLoaded`、`handleWebViewMessage`、`handleWebViewError`，避免 `onLoad`、`onError` 等 uni-app 保留生命周期名。页面无需 `ref`、`onShow`、`onHide`、`onUnload` 或手动 `destroy`。
 
 ### 11.4 Canvas 封装与 ID 管理
 
@@ -683,7 +685,7 @@ export default {
 - 默认 ID 为 `acb-print-${pageInstanceId}-${componentSeq}`，只含字母、数字、短横线，避免多壳实例冲突。
 - 页面可传固定 `canvasId`，组件需检查本页内未重复；重复则初始化失败。
 - 同一个壳实例整个生命周期保持 ID 不变。
-- `printer.startDiscovery/connect/preview/print` 均由 printer adapter 注入该 ID。
+- `printer.startDiscovery/connect/print` 均由 printer adapter 注入该 ID。
 - adapter 同时注入 `onCanvasResize`，壳组件更新宽高并在下一渲染节拍后 resolve；销毁时完成并清除所有 resize waiter。
 - 初始画布采用当前已验证的安全尺寸 960×960，位置移出可视区；销毁时宽高归零并释放等待器。
 
@@ -776,8 +778,8 @@ RPC 层错误用于传输/协议失败；已进入 action handler 的业务成�
 - `printer_connect` → `printer.getState/disconnect/connect`，同设备 ready 幂等，不同设备先断开；
 - `printer_disconnect` → 快照后断开并映射 `alreadyDisconnected`；
 - `printer_status` → `printer.getState()`，映射 busy/activeJob/device；
-- `printer_preview` → `printer.preview(job)`，临时路径在 bridge App 侧转 Data URL 后分片给 H5；preview 是有资源副作用但不出纸的任务，不自动重试整个 RPC；
-- `printer_print` → `printer.print(job)`，H5 大图片先重组和摘要验证；
+- `printer_preview`：不属于 App Bridge 能力，不注册、不导出、不提供特殊 handler；H5 若调用该名称，按普通未注册 action 返回既有 `METHOD_NOT_FOUND/UNSUPPORTED_ACTION` 错误；
+- `printer_print` → `printer.print(job)`，H5 大图片先重组和摘要验证；每个请求只调用一次 manager，`width/height/orientation/copies/gapType/threshold` 原值透传，`printDarkness/printSpeed` 分别映射为 `darkness/speed`；
 - `printer_capture`：保留为 H5 本地 DOM 捕获逻辑，不经过 App action；
 - `printer_cancel`：**删除候选**。新 bridge 不注册虚假 handler；过渡版本调用时返回 `unsupported/UNSUPPORTED`，不得扩展 manager、直接调用 Dothan或以 disconnect 冒充取消。
 
@@ -786,7 +788,6 @@ RPC 层错误用于传输/协议失败；已进入 action handler 的业务成�
 保持旧公开签名和顺序：
 
 ```ts
-printer_preview(image, width, height, orientation?, threshold?)
 printer_print(image, width, height, orientation?, copies?, gapType?, printDarkness?, printSpeed?, threshold?)
 ```
 
@@ -802,9 +803,9 @@ printer_print(image, width, height, orientation?, copies?, gapType?, printDarkne
 - `printSpeed`：严格整数 `1..5` 或 `255`；
 - `threshold`：严格整数 `0..255`。
 
-adapter 映射：`printDarkness → darkness`、`printSpeed → speed`。`printer_preview.code` 类型修正为字符串。
+adapter 映射：`printDarkness → darkness`、`printSpeed → speed`；`width/height` 不因 `orientation=90/270` 在外桥交换，旋转由 manager 的 `orientation` 字段处理。
 
-## 14. 打印与预览稳定分片
+## 14. 打印稳定分片
 
 ### 14.1 固定初始参数
 
@@ -834,7 +835,7 @@ await new Promise(resolve => setTimeout(resolve, 0))
 
 在支持且验证稳定的 H5 可优先使用 `scheduler.yield()`；App-vue 默认使用 `setTimeout(0)`。每 4 片或累计 8ms 让出一次主线程，先到者触发。重组摘要也分段处理，避免连续长任务。
 
-### 14.3 H5→App：`printer_print`/`printer_preview` 输入
+### 14.3 H5→App：`printer_print` 输入
 
 1. H5 严格校验全部业务参数；失败时不创建 transfer。
 2. 小于阈值的 Data URL 直接放 request；HTTP(S) URL 只作为普通短字符串传给 manager，由既有打印链路加载，禁止由 bridge 任意下载或把网络响应纳入分片。
@@ -848,17 +849,9 @@ await new Promise(resolve => setTimeout(resolve, 0))
 10. 业务 request 可在附件完成前到达，但只等待到该 RPC 的剩余 timeout；附件未完成即返回 `ATTACHMENT_NOT_FOUND/TRANSFER_INCOMPLETE`，禁止无限等待。
 11. action finally 释放 attachment；错误、timeout、导航、session 替换和 destroy 都 abort。为避免“附件先完成但 request 永不抵达”泄漏，COMPLETED 未消费附件使用不超过 30 秒的独立 TTL。
 
-### 14.4 App→H5：`printer_preview` 输出
+### 14.4 Preview 边界
 
-1. `printer.preview()` 返回后，bridge 只读取公开结果中的 `dataUrl` 候选；该字段可能实际承载 Data URL、`tempFilePath` 或 `_doc/_downloads/file://` 路径，不扫描任意嵌套对象。
-2. 已是 Data URL：校验 MIME、Base64 与大小。
-3. App 本地路径执行两阶段验证：输入引用只接受 `_doc/`、策略允许的 `_downloads/` 或本机绝对 `file://`，默认拒绝 `content://`、裸绝对路径、`..` 及多层编码 traversal；随后用 `plus.io.resolveLocalFileSystemURL` 得到 `FileEntry`，再通过 `plus.io.requestFileSystem(PRIVATE_DOC/PUBLIC_DOWNLOADS)` 取得可信根。`entry` 与根都转换为规范化绝对路径后按目录分隔符边界比较，禁止前缀碰撞和越界；不得把用于输入引用的正则再次套在 `entry.fullPath` 上。运行时缺少可信根、路径或 API 时 fail closed。
-4. 空路径、不存在、读取失败返回 `ERROR_GET_IMAGE_DATA`；本地路径绝不原样返回 H5。读取前以 `file.size` 执行 5 MiB 上限检查；`FileReader.readAsDataURL` 后严格校验 Data URL 结构、PNG/JPEG/WebP MIME、规范 Base64、解码大小不超过 5 MiB，并以可取得的 magic bytes 核对 MIME。只有已证明处于批准根且文件名/目录可识别为本次临时图片的文件才在 `finally` 删除，否则保留并记录脱敏的安全清理跳过日志。结构化日志只记录 input kind、resolve success、root check、file bytes、read success、mime、data bytes 与 cleanup，不记录完整路径或 Base64。
-5. 大于阈值按同一对称状态机发送 start/chunk/complete，并逐阶段 ACK/重试/yield。
-6. 普通 RPC response 只携带 attachment 描述符。
-7. H5 完成摘要校验与重组后，再把 Data URL 填回旧返回 `data.image` 并完成 Promise。
-
-临时文件转换和分片均在外桥，不修改 manager。
+`printer_preview` 已从 App Bridge 的能力协商、registry、handler 和公开类型中移除，外桥不再调用 manager 的 `preview()`，也不再执行预览临时文件读取或 App→H5 预览附件发送。H5 若仍请求该 action，由 Core 按普通未注册方法返回既有错误，不增加 preview 专用错误分支。manager 及其底层预览实现保持不动。
 
 ### 14.5 去重与副作用保护
 
@@ -884,39 +877,36 @@ NEW → STARTED → RECEIVING → VERIFYING → COMPLETED → CONSUMED
 
 ### 15.1 App 壳组件
 
-- `created`：建立 owner、安装仅处理 `ready` 的启动缓冲；该入口也必须执行消息大小、schema、当前 WebView 和 origin 校验，不注册业务 handler、不调用 manager；
-- `onReady/mounted`：绑定组件所属 WebView、建立 transport、注册 adapter、`start()`；
-- `onShow`：只恢复 bridge 诊断，不隐式重开扫描或设备连接；
-- `onHide`：停止当前 session 持有的扫描和高耗能订阅，不销毁全局 manager；
-- `onUnload/beforeDestroy`：先 `disposed=true`，再 destroy bridge、transfer、事件、scan、页面资源与 WebView 引用。
+- App 壳创建时建立 owner，绑定明确 WebView，安装 receiver、transport 和 action adapter，随后进入常驻 `listening`；H5 缺席不触发 connect timeout，不销毁 App Bridge。
+- 收到合法 `ready` 后建立活动 session；新 session 替换旧 session 时提升 generation，并按会话清理规则 reset 后继续 `listening/session-active`，无需重建 App Bridge。
+- `onShow`：复核运行时和 WebView 归属，不隐式重开扫描或设备连接；
+- `onHide`/App `pause`：不销毁 Bridge、不 reset session、不因后台状态拒绝已经送达或随后送达的控制消息；后台控制消息及执行中的控制任务继续处理。只有具体能力自身受 Android 平台限制时返回对应业务错误。
+- WebView reload/close、导航失信、显式 `disconnect` 或新 session 替换：执行 session reset，清理该 session 的 pending、queue、订阅、附件、ACK waiter、timer、扫码、扫描和称重等待、打印 operation 去重记录及 canvas waiter；已进入底层且不可取消的迟到结果按旧 generation 丢弃。
+- session reset 不调用 `app-ble-manager.lifecycle.shutdown()`，也不调用 `printer.disconnect()` 或 `scale.disconnect()`；打印机、电子秤等已建立 BLE 设备连接保留，由业务显式 disconnect 或 App 根生命周期统一管理。
+- App 进程终止后内存中的 Bridge、session 和 BLE 连接均消失；冷启动重新创建 App Bridge 并进入 `listening`，H5 重新 init，BLE 设备必须由业务重新连接，不把系统可能残留的链路视为已恢复。
 
-页面隐藏不等于页面销毁：`onHide` 后连接可以保留，但该 session 不接受新的 H5 能力请求；恢复 `onShow` 时重新核验 WebView URL 和 owner 后才恢复调用。页面真正卸载或导航失信才执行完整 destroy。
-
-单 WebView session 清理与 manager 全局 `lifecycle.shutdown()` 分开：页面销毁只释放 bridge 自己创建的扫描订阅、事件监听、扫码会话、pending、transfer 与 canvas 资源，不主动断开页面开始前已存在或由其他消费者持有的打印机/电子秤连接。BridgeShell **不调用** manager 全局 `lifecycle.shutdown()`；该调用只属于现有 App 根生命周期所有者，避免 bridge 猜测 manager 的全局 owner。
+页面隐藏不等于页面销毁，后台运行也不等于 H5 离线。协议不使用心跳或 H5 缺席定时器；只有明确生命周期事件触发会话清理。
 
 ### 15.2 WebView 绑定
 
 - 壳组件保存创建/渲染后确认的明确 child WebView 引用和 ID；HTML 模板 ID 只用于页面节点，不能作为原生 `WebviewObject.id` 相等假设。
 - 从页面 `children()` 过滤具备 `evalJS` 的候选，以规范化 URL 匹配在线 HTTP(S) 与本地 `file://`、`www/_www`、`/hybrid/...` 路径；URL 唯一命中优先，仅一个候选可明确兜底，多个候选不可猜测。
-- 绑定由 mounted/nextTick 主动开始，使用 3–5 秒有界总预算和适当间隔；模板 `load` 与可用时原生 `loaded` 仅补充同一 singleflight，首次迟到信号不重建，后续真实 reload 才触发重建；destroy/reload 必须取消重试并解绑原生监听，旧 generation 的迟到结果不得创建 bridge。
+- 绑定由 mounted/nextTick 主动开始，使用 3–5 秒有界总预算和适当间隔；模板 `load` 与可用时原生 `loaded` 仅补充同一 singleflight，首次迟到信号不重建，后续真实 reload 只 reset 旧 session 并重新绑定 WebView；reload 必须取消旧重试并解绑旧 WebView 监听，旧 generation 的迟到结果不得建立 session，App Bridge 本身继续 `listening`。
 - transport destroy 后清空引用，任何 send 稳定返回 `BRIDGE_DESTROYED`。
 
-### 15.3 Destroy 固定顺序
+### 15.3 Session reset 与 App 销毁
 
-1. 幂等设置 `destroying/disposed`，阻止新调用；
-2. 吊销 origin/session/generation；
-3. 清握手、连接、pending、ACK、transfer timer；
-4. 通过 `finishPending()` 拒绝 pending；
-5. 清 queue 与墓碑索引；
-6. 取消所有事件订阅；
-7. abort 所有 transfer，清打印 operation 去重缓存；
-8. 停止该 session 拥有的扫描，取消扫码/称重等待；
-9. 清 handler 和 inbound token；
-10. 销毁 transport，按身份移除 receiver或释放 WebView；
-11. 清 canvas resize waiter 和组件引用；
-12. 转为 `destroyed`，snapshot 资源计数为 0。
+Session reset 固定顺序：
 
-单步失败不得阻止后续清理。已进入 manager 的异步业务不能由 Core 强制取消，但其迟到结果因 generation/owner 不匹配不得发送。
+1. 幂等吊销当前 session/generation，阻止该 session 新调用；
+2. 清该 session 的握手、pending、ACK、transfer timer；
+3. 通过 `finishPending()` 拒绝该 session pending，清 queue 与墓碑索引；
+4. 取消该 session 的事件订阅，abort transfer，清打印 operation 去重缓存；
+5. 停止该 session 拥有的扫描，取消扫码和称重等待；
+6. 清该 session handler continuation、inbound token 和 canvas waiter；
+7. 保留 App receiver、transport、action registry 及打印机/电子秤 BLE 连接，回到 `listening`。
+
+App Bridge 仅在 App 壳永久销毁或 App 进程终止时执行全局 destroy：在 session reset 之后销毁 transport、按身份移除 receiver并释放 WebView 引用，最终状态为 `process-destroyed`。单步失败不得阻止后续清理。已进入 manager 的异步业务不能由 Core 强制取消，但其迟到结果因 generation/owner 不匹配不得发送。
 
 ## 16. 错误码
 
@@ -1050,7 +1040,7 @@ NEW → STARTED → RECEIVING → VERIFYING → COMPLETED → CONSUMED
 - 公开 H5 函数名、参数顺序、NASL 类型和 envelope；
 - 全 action 清单与 registry 双向一致；
 - `scale_status` 确实注册；
-- `printer_preview.code` 为字符串；
+- `printer_preview` 未注册，调用走普通 `METHOD_NOT_FOUND/UNSUPPORTED_ACTION` 错误；
 - `orientation` 默认明确传 0；
 - 蓝牙搜索使用真实 scanId 并 finally 停止/退订；
 - 打印字段映射和临时文件转换；
@@ -1067,7 +1057,7 @@ NEW → STARTED → RECEIVING → VERIFYING → COMPLETED → CONSUMED
 - 慢加载、刷新、前后台、BFCache（若目标 Android System WebView 支持）、连续进入退出 200 次；
 - WebView 导航到非白名单页面；
 - receiver 缺失、页面关闭、引用失效；
-- 大图片 print 与大 preview 双向分片；
+- 大图片 print 输入分片；
 - Android BLE 开关、搜索、秤、打印机、扫码；扫码在目标 targetSdk 无安全 Receiver 能力时验收准确 `SCAN_RECEIVER_UNAVAILABLE`；
 - 网络离线、H5 资源加载失败、H5 发布版本与 bridge 协议不匹配。
 
@@ -1113,7 +1103,7 @@ NEW → STARTED → RECEIVING → VERIFYING → COMPLETED → CONSUMED
 1. 协议、H5 公开 API、action schema、registry 和旧 envelope 契约测试全部通过，`scale_status` 已注册，`printer_cancel` 仅按约定 unsupported/移除。
 2. Core 并发、乱序、timeout、重复、session/generation、destroy 与资源归零测试通过。
 3. Android 真实 WebView 能可靠绑定实例、读取当前 URL并在导航失信时吊销；做不到则阻断发布。
-4. 5 MiB 双向图片、ACK 丢失、摘要损坏、预算超限、preview 临时文件转换和打印去重真机测试通过。
+4. 5 MiB 打印输入、ACK 丢失、摘要损坏、预算超限和打印去重真机测试通过；`printer_preview` 未注册回归通过。
 5. 目标 Android 外设链路通过；扫码不可安全实现时以明确 unsupported 发布并在能力协商中移除 `scan_start/scan_cancel`。
 6. 连续进出 200 次无资源增长，性能指标达标，日志不包含图片、敏感参数或完整标识。
 7. 灰度开关和旧桥回滚路径演练通过；同一页面不得同时运行新旧桥，不得双写打印。
@@ -1129,7 +1119,7 @@ NEW → STARTED → RECEIVING → VERIFYING → COMPLETED → CONSUMED
 5. **实现 H5 生命周期**：owner/ref count、SDK 单例加载、失败重试、节点清理、BFCache、`bridge_destroy`。
 6. **实现壳组件**：封装 WebView、hidden canvas、canvasId、resize waiter、页面生命周期工厂。
 7. **接入 adapters**：只调用 `app-ble-manager`；把 scan 放本插件 services；建立 action registry 契约测试。
-8. **实现分片和文件转换**：统一双向状态机、ACK/重试/hash/yield/预算/去重/abort；preview 路径转 Data URL。
+8. **实现分片**：统一 H5→App 状态机、ACK/重试/hash/yield/预算/去重/abort。
 9. **改造 H5 LCAP 逻辑**：严格主校验、旧签名和 envelope、自动 ensure + 显式 init/destroy、修正声明。
 10. **并行灰度**：开发构建可通过配置切换旧桥/新桥，但单页面只允许一个 receiver 和一个业务 bridge；日志对比结果，不做同一打印请求双写。
 11. **Android 真机验收**：冻结 Android 设备、系统 WebView、targetSdk 与业务外设运行矩阵，完成全量回归。
@@ -1144,8 +1134,8 @@ NEW → STARTED → RECEIVING → VERIFYING → COMPLETED → CONSUMED
 - 旧 H5 公开业务函数名、参数顺序和统一 envelope；
 - 蓝牙搜索等待窗口、名称过滤、deviceId 去重和 finally 清理经验；
 - 打印尺寸/方向/份数/间隙/浓度/速度/阈值规则；
-- 打印和预览共用任务互斥的业务认识；
-- preview 本地路径必须转 Data URL；
+- 打印任务互斥的业务认识；
+- 图片输入必须由 App Bridge 校验并安全传给 manager；
 - 双向分片的直接阈值、逐片 ACK、有限重试和 abort 基本思路；
 - `rpc-bridge` 的共享 Core、pending、乱序匹配、session/generation、严格 JSON、安全 evalJS 和 destroy 思路；
 - `online-explore` 的薄 `WebViewRpc` 包装与启动 ready 缓冲思路。

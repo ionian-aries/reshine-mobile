@@ -3,7 +3,7 @@ FROM --platform=linux/amd64 node:22-bookworm-slim AS node-runtime
 FROM --platform=linux/amd64 eclipse-temurin:17-jdk-jammy AS cache
 ARG ANDROID_COMMAND_LINE_TOOLS_URL=https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
 ARG GRADLE_DISTRIBUTION_URL=https://services.gradle.org/distributions/gradle-8.11.1-bin.zip
-ENV ANDROID_SDK_ROOT=/opt/android-sdk ANDROID_HOME=/opt/android-sdk GRADLE_USER_HOME=/opt/gradle-home
+ENV ANDROID_SDK_ROOT=/opt/android-sdk ANDROID_HOME=/opt/android-sdk GRADLE_USER_HOME=/opt/gradle-home GRADLE_OPTS=-Dorg.gradle.caching=true
 ENV PATH=/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/35.0.0:$PATH
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /opt/android-sdk/cmdline-tools /opt/gradle-home
@@ -19,7 +19,7 @@ RUN sed -i 's#^distributionUrl=.*#distributionUrl=file\:/opt/gradle-8.11.1-bin.z
  && chmod +x /opt/template/gradlew \
  && cp -a /opt/template /tmp/prewarm-project \
  && cd /tmp/prewarm-project \
- && ./gradlew --no-daemon --refresh-dependencies clean :simpleDemo:assembleRelease \
+ && ./gradlew --no-daemon --build-cache --refresh-dependencies :simpleDemo:assembleRelease \
  && test -n "$(find simpleDemo/build/outputs/apk/release -maxdepth 1 -name '*.apk' -type f -print -quit)" \
  && apksigner verify simpleDemo/build/outputs/apk/release/*.apk \
  && rm -rf /tmp/prewarm-project /opt/template/.gradle /opt/template/simpleDemo/build \
@@ -27,7 +27,7 @@ RUN sed -i 's#^distributionUrl=.*#distributionUrl=file\:/opt/gradle-8.11.1-bin.z
 COPY docker /opt/scripts
 
 FROM --platform=linux/amd64 eclipse-temurin:17-jdk-jammy
-ENV ANDROID_SDK_ROOT=/opt/android-sdk ANDROID_HOME=/opt/android-sdk GRADLE_USER_HOME=/opt/gradle-home
+ENV ANDROID_SDK_ROOT=/opt/android-sdk ANDROID_HOME=/opt/android-sdk GRADLE_USER_HOME=/opt/gradle-home GRADLE_OPTS=-Dorg.gradle.caching=true
 ENV PATH=/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/35.0.0:$PATH
 RUN apt-get update && apt-get install -y --no-install-recommends coreutils unzip && rm -rf /var/lib/apt/lists/* \
  && useradd --create-home --uid 10001 --shell /usr/sbin/nologin builder \

@@ -3,7 +3,7 @@ const DATA_URL = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/i
 const HTTP_URL = /^https?:\/\/[^\s]+$/i
 const GAP_TYPES = [0, 1, 2, 3, 4, 255]
 const NO_PARAM_ACTIONS = new Set(['bluetooth_getState', 'bluetooth_enable', 'bluetooth_disable', 'scale_disconnect', 'scale_status', 'printer_disconnect', 'printer_status', 'scan_cancel'])
-const OBJECT_PARAM_ACTIONS = new Set(['scan_start', 'bluetooth_search', 'scale_connect', 'scale_readWeight', 'printer_connect', 'printer_print', 'printer_preview'])
+const OBJECT_PARAM_ACTIONS = new Set(['scan_start', 'bluetooth_search', 'scale_connect', 'scale_readWeight', 'printer_connect', 'printer_print'])
 
 export class ActionValidationError extends Error {
   constructor(message, code = 'INVALID_ARGUMENT') { super(message); this.code = code }
@@ -63,21 +63,16 @@ export function validateImage(image, directLimitBytes = Number.POSITIVE_INFINITY
   if (utf8Bytes(value) > directLimitBytes) throw new ActionValidationError('本阶段不支持大图片传输', 'LARGE_PAYLOAD_UNSUPPORTED')
   return value
 }
-export function printJob(params, canvasId, preview) {
-  const keys = preview
-    ? ['image', 'imageAttachment', 'width', 'height', 'orientation', 'threshold']
-    : ['image', 'imageAttachment', 'width', 'height', 'orientation', 'copies', 'gapType', 'printDarkness', 'printSpeed', 'threshold']
-  const value = exact(params, keys)
+export function printJob(params, canvasId) {
+  const value = exact(params, ['image', 'imageAttachment', 'width', 'height', 'orientation', 'copies', 'gapType', 'printDarkness', 'printSpeed', 'threshold'])
   const result = {
     image: value.imageAttachment ? '' : validateImage(value.image), width: finite(value.width, 'width', 0, 1000), height: finite(value.height, 'height', 0, 5000),
     orientation: integer(value.orientation, 'orientation', 0, 270, 0, [0, 90, 180, 270]),
     threshold: integer(value.threshold, 'threshold', 0, 255, 128), canvasId,
-  }
-  if (!preview) Object.assign(result, {
     copies: integer(value.copies, 'copies', 1, 1000, 1), gapType: integer(value.gapType, 'gapType', 0, 255, 255, GAP_TYPES),
     darkness: integer(value.printDarkness, 'printDarkness', 1, 255, 255, [...Array(15)].map((_, i) => i + 1).concat(255)),
     speed: integer(value.printSpeed, 'printSpeed', 1, 255, 255, [1, 2, 3, 4, 5, 255]),
-  })
+  }
   return result
 }
 function utf8Bytes(value) {

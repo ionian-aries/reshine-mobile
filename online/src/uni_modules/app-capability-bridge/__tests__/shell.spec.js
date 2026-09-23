@@ -1,4 +1,4 @@
-import { attachRuntimeLifecycle, createShellLifecycle, createStartupReadyBuffer, getNativeWebViewUrl, getOwnedWebViewCandidates, getPageWebView, normalizeWebViewUrl, parseBridgeSource, resolveWebViewCandidate, waitForWebView } from '../js_sdk/shell-runtime.js'
+import { attachRuntimeLifecycle, configureStatusBar, createShellLifecycle, createStartupReadyBuffer, getNativeWebViewUrl, getOwnedWebViewCandidates, getPageWebView, normalizeWebViewUrl, parseBridgeSource, resolveStatusBarHeight, resolveWebViewCandidate, waitForWebView } from '../js_sdk/shell-runtime.js'
 import fs from 'fs'
 import path from 'path'
 
@@ -23,9 +23,35 @@ describe('bridge plugin registration', () => {
     handlers.forEach(handler => expect(component).toMatch(new RegExp(`${handler}\\s*\\(`)))
     expect(handlers).not.toEqual(expect.arrayContaining(['onLoad', 'onError']))
   })
+
+  test('offsets the native webview and renders one transparent status bar spacer', () => {
+    const component = fs.readFileSync(path.resolve(__dirname, '../components/app-capability-bridge-shell/app-capability-bridge-shell.vue'), 'utf8')
+    expect(component).toMatch(/class="bridge-status-bar" :style="statusBarStyle"/)
+    expect(component).toMatch(/\.bridge-status-bar \{ width: 100%; background-color: transparent; \}/)
+    expect(component).toMatch(/:webview-styles="webviewStyles"/)
+    expect(component).toMatch(/webviewStyles\(\) \{ return \{ top: this\.statusBarHeight, bottom: 0 \} \}/)
+    const app = fs.readFileSync(path.resolve(__dirname, '../../../App.vue'), 'utf8')
+    expect(app).not.toMatch(/padding-top:\s*var\(--status-bar-height\)/)
+  })
 })
 
 describe('bridge shell source', () => {
+  test('resolves status bar height from plus first and uni as a safe fallback', () => {
+    const plusRuntime = { navigator: { isImmersedStatusbar: () => true, getStatusbarHeight: () => 24 } }
+    expect(resolveStatusBarHeight(plusRuntime, { getSystemInfoSync: () => ({ statusBarHeight: 20 }) })).toBe(24)
+    expect(resolveStatusBarHeight({ navigator: { isImmersedStatusbar: () => false } }, { getSystemInfoSync: () => ({ statusBarHeight: 20 }) })).toBe(0)
+    expect(resolveStatusBarHeight({ navigator: { isImmersedStatusbar: () => { throw new Error('unavailable') } } }, { getSystemInfoSync: () => ({ statusBarHeight: 20 }) })).toBe(20)
+    expect(resolveStatusBarHeight(null, { getSystemInfoSync: () => { throw new Error('unavailable') } })).toBe(0)
+  })
+
+  test('configures a transparent status bar with dark content without throwing on partial runtimes', () => {
+    const navigator = { setStatusBarBackground: jest.fn(), setStatusBarStyle: jest.fn() }
+    expect(configureStatusBar({ navigator })).toBe(true)
+    expect(navigator.setStatusBarBackground).toHaveBeenCalledWith('#00000000')
+    expect(navigator.setStatusBarStyle).toHaveBeenCalledWith('dark')
+    expect(configureStatusBar(null)).toBe(false)
+  })
+
   test('parses online HTTP(S) source and keeps its origin', () => {
     expect(parseBridgeSource(' https://example.test/a?x=1#hash ')).toEqual({ src: 'https://example.test/a?x=1#hash', kind: 'remote', origin: 'https://example.test' })
   })
@@ -124,6 +150,12 @@ describe('bridge shell lifecycle', () => {
     expect(buffer.flush(message => received.push(message.sessionId))).toBe(4)
     expect(received).toEqual(['b', 'c', 'd', 'e']); expect(buffer.size()).toBe(0)
     buffer.push(ready('f')); expect(buffer.clear('reload')).toBe(1)
+  })
+
+  test('hidden pages keep routing protocol messages while hide still cancels scan', () => {
+    const component = fs.readFileSync(path.resolve(__dirname, '../components/app-capability-bridge-shell/app-capability-bridge-shell.vue'), 'utf8')
+    expect(component).toMatch(/createShellLifecycle\(\{ hide: reason => \{ if \(this\.bridge\) this\.bridge\.cancelScan/)
+    expect(component).not.toMatch(/handleWebViewMessage\(event\) \{[\s\S]{0,180}isVisible\(\)/)
   })
 
   test('component mounts without load, shares mounted/load start, ignores late first load, reloads on real navigation, and cancels destroy', () => {

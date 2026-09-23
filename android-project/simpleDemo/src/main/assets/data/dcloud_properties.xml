@@ -8,6 +8,7 @@
 		<feature name="Camera" value="io.dcloud.js.camera.CameraFeatureImpl"/>
 		<feature name="Console" value="io.dcloud.feature.pdr.LoggerFeatureImpl"/>
 		<feature name="Device" value="io.dcloud.feature.device.DeviceFeatureImpl"/>
+		<feature name="Bluetooth" value="io.dcloud.feature.bluetooth.BluetoothFeature"/>
 		<feature name="File" value="io.dcloud.js.file.FileFeatureImpl"/>
 		<feature name="Proximity" value="io.dcloud.feature.sensor.ProximityFeatureImpl"/>
 		<feature name="Storage" value="io.dcloud.feature.pdr.NStorageFeatureImpl"/>

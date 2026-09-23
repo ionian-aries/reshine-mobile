@@ -14,12 +14,20 @@
 			"delay": 0
 		},
 		"modules": { /* 模块配置 */
-
+			"Bluetooth": {}
 		},
 		"distribute": { /* 应用发布信息 */
 			"android": { /* android打包配置 */
 				"permissions": [
-					"<uses-permission android:name=\"android.permission.INTERNET\"/>"
+					"<uses-permission android:name=\"android.permission.INTERNET\"/>",
+					"<uses-permission android:name=\"android.permission.REQUEST_INSTALL_PACKAGES\"/>",
+					"<uses-permission android:name=\"android.permission.BLUETOOTH\" android:maxSdkVersion=\"30\"/>",
+					"<uses-permission android:name=\"android.permission.BLUETOOTH_ADMIN\" android:maxSdkVersion=\"30\"/>",
+					"<uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" android:maxSdkVersion=\"28\"/>",
+					"<uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" android:maxSdkVersion=\"30\"/>",
+					"<uses-permission android:name=\"android.permission.BLUETOOTH_SCAN\" android:usesPermissionFlags=\"neverForLocation\"/>",
+					"<uses-permission android:name=\"android.permission.BLUETOOTH_CONNECT\"/>",
+					"<uses-feature android:name=\"android.hardware.bluetooth_le\" android:required=\"false\"/>"
 				]
 			},
 			"ios": { /* ios打包配置 */

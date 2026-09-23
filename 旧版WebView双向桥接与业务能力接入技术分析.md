@@ -9,7 +9,7 @@
 - 旧 uni-app：`/Users/zhuanghengheng/Works/8.31金川瑞翔-new/reshine-mobile-online`
 - 旧 H5 依赖库：`/Users/zhuanghengheng/Works/8.31金川瑞翔-new/reshine-uniapp-mobile-bridege-library`
 - 当前目标壳：`reshine-mobile/online`
-- 当前目标依赖库：`reshine_uniapp_mobile_bridege_library`
+- 当前目标依赖库：`reshine_uniapp_mobile_bridge_library`
 - 当前 BLE 插件：`reshine-mobile/online/src/uni_modules/app-ble-manager`
 
 结论：旧系统已经实现“H5 逻辑调用 → `uni.postMessage` → uni-app 路由 → 原生业务服务 → `evalJS` 返回”的闭环，并针对双向大 Base64 数据实现了内存分片。但旧实现存在 API 映射断链、安全边界不足、分片协议不对称、事件模型薄弱和测试不足等问题，不应原样复制。
@@ -471,11 +471,12 @@ LCAP 逻辑只做类型稳定的业务包装，不应直接散落处理 postMess
 
 ### 9.4 生命周期
 
-- `onReady`：绑定明确 WebView，创建 bridge session，注册 action adapter。
-- `onShow`：恢复必要状态，但不隐式重复扫描。
-- `onHide`：按策略停止扫描和高耗能任务。
-- `onUnload`：取消 pending、abort transfer、退订事件、断开领域连接、调用 `lifecycle.shutdown()`。
-- 页面导航或 origin 变化：立即吊销 session。
+- App 壳建立 Bridge 后常驻 `listening`；H5 缺席不触发超时或失败。
+- H5 按需 `bridge_init`；退出时单向发送尽力而为的 `disconnect` 并立即 `destroy`，不等待 `disconnect-ack`；再次进入时创建新实例、新 session 并完整 `re-init`。
+- App 收到 disconnect、WebView reload/close 或新 session 时执行 session reset，清理旧 session 的 pending、订阅、附件、扫描、扫码和等待资源，但保留打印机、电子秤等 BLE 设备连接，不调用 `lifecycle.shutdown()`。
+- App 进入后台时 Bridge 与 session 保持，后台控制消息及执行中的任务继续处理；协议不使用心跳判断 H5 存活。
+- App 进程终止后内存状态丢失；冷启动重新建立 `listening`，H5 重新 init，BLE 设备必须由业务重新连接。
+- 页面导航或 origin 变化：立即吊销当前 session，完成 session reset 后 App Bridge 继续 listening。
 
 ## 10. 测试与验收要求
 

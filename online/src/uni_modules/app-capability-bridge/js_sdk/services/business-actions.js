@@ -1,7 +1,5 @@
 import defaultAdapter from '../adapters/ble-manager-adapter.js'
-import { ActionValidationError, boolean, exact, integer, noParams, optionalString, printJob, requiredString, validateImage } from './action-validation.js'
-import { isLargeDataUrl } from './transfer-manager.js'
-import { readPreviewDataUrl } from './preview-file.js'
+import { ActionValidationError, boolean, exact, integer, noParams, optionalString, printJob, requiredString } from './action-validation.js'
 import { createHoneywellScanService } from './honeywell-scan.js'
 
 const ok = (data = {}, message = '') => ({ status: 'success', code: 'OK', message, data })
@@ -9,7 +7,7 @@ const DATA_DEFAULTS = Object.freeze({
   scan_start: () => ({ data: '', codeId: '', aimId: '', charset: '' }), scan_cancel: () => ({}),
   bluetooth_getState: () => ({ enabled: false }), bluetooth_enable: () => ({ enabled: false, pending: false }), bluetooth_disable: () => ({ enabled: false, pending: false }), bluetooth_search: () => ({ devices: [] }),
   scale_connect: () => ({ deviceId: '', serviceId: '' }), scale_disconnect: () => ({ disconnected: false, alreadyDisconnected: false, deviceId: '' }), scale_status: () => ({ connected: false, busy: false, activeOperation: '', deviceId: '', deviceName: '', serviceId: '', hasStableWeight: false }), scale_readWeight: () => ({ overload: false, stable: false, weight: '', unit: '', weightType: '', raw: '' }),
-  printer_connect: () => ({ printer: { deviceId: '', deviceName: '', name: '' } }), printer_disconnect: () => ({ disconnected: false, alreadyDisconnected: false, deviceId: '' }), printer_status: () => ({ connected: false, busy: false, activeJob: '', deviceId: '', deviceName: '' }), printer_print: () => ({}), printer_preview: () => ({ image: '' }),
+  printer_connect: () => ({ printer: { deviceId: '', deviceName: '', name: '' } }), printer_disconnect: () => ({ disconnected: false, alreadyDisconnected: false, deviceId: '' }), printer_status: () => ({ connected: false, busy: false, activeJob: '', deviceId: '', deviceName: '' }), printer_print: () => ({}),
 })
 export const businessFailureData = action => (DATA_DEFAULTS[action] || (() => ({})))()
 function errorText(error) {
@@ -40,8 +38,41 @@ function normalizeEnvelope(action, value) {
   const suppliedData = value.data && typeof value.data === 'object' && !Array.isArray(value.data) ? value.data : {}
   return Object.assign({}, normalized, { status: value.status === 'unsupported' ? 'unsupported' : 'error', data: Object.assign({}, normalized.data, suppliedData) })
 }
-function handler(actionName, action) { return async params => { try { return normalizeEnvelope(actionName, await action(params)) } catch (error) { return failure(actionName, error) } } }
+function handler(actionName, action) { return async (params, ctx) => { try { return normalizeEnvelope(actionName, await action(params, ctx)) } catch (error) { return failure(actionName, error) } } }
 function stateDevice(state, key) { return state && state[key] && typeof state[key] === 'object' ? state[key] : {} }
+function hasOwn(value, key) { return !!value && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, key) }
+function finiteWeight(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null
+  if (typeof value !== 'string') return null
+  const text = value.trim()
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(text)) return null
+  const number = Number(text)
+  return Number.isFinite(number) ? number : null
+}
+function negativeHint(result) {
+  if (result.sign === '-') return 'sign'
+  if (result.negative === true) return 'negative'
+  const raw = typeof result.rawFrame === 'string' ? result.rawFrame : (typeof result.raw === 'string' ? result.raw : '')
+  return /^(?:ST|US|OL),(?:NT|TR),-/.test(raw.trim()) ? 'raw' : ''
+}
+function normalizeWeight(result) {
+  const sourceKey = hasOwn(result, 'rawWeight') ? 'rawWeight' : (hasOwn(result, 'weight') ? 'weight' : (hasOwn(result, 'value') ? 'value' : (hasOwn(result, 'raw') && typeof result.raw !== 'object' ? 'raw' : '')))
+  const source = sourceKey ? result[sourceKey] : ''
+  const numeric = finiteWeight(source)
+  if (numeric === null) return { weight: source === null || source === undefined ? '' : String(source), source: sourceKey || 'none', signSource: 'none', conflict: false }
+  const explicitNegative = typeof source === 'string' ? /^-/.test(source.trim()) : (source < 0 || Object.is(source, -0))
+  const hint = negativeHint(result)
+  const conflict = explicitNegative && result.sign === '+'
+  if (explicitNegative) return { weight: numeric === 0 ? '0' : String(source).trim(), source: sourceKey, signSource: typeof source === 'number' ? 'weight-number' : 'weight', conflict }
+  if (hint) return { weight: numeric === 0 ? '0' : `-${String(source).trim().replace(/^\+/, '')}`, source: sourceKey, signSource: hint, conflict: result.sign === '+' }
+  return { weight: numeric === 0 ? '0' : String(source).trim().replace(/^\+/, ''), source: sourceKey, signSource: result.sign === '+' ? 'sign' : 'weight', conflict }
+}
+function rawSummary(value) {
+  const raw = typeof value === 'string' ? value : ''
+  let hash = 2166136261
+  for (let index = 0; index < raw.length; index += 1) { hash ^= raw.charCodeAt(index); hash = Math.imul(hash, 16777619) }
+  return { rawLength: raw.length, rawHash: raw ? (hash >>> 0).toString(16).padStart(8, '0') : '', rawNegative: /^(?:ST|US|OL),(?:NT|TR),-/.test(raw.trim()) }
+}
 const BLUETOOTH_USER_DECISION_CODES = new Set([
   'OPERATION_CANCELLED', 'PERMISSION_DENIED', 'USER_CANCEL', 'USER_CANCELLED', 'CANCEL', 'CANCELLED',
   'SYSTEM_BLUETOOTH_ENABLE_DENIED', 'SYSTEM_BLUETOOTH_DISABLE_DENIED',
@@ -82,14 +113,15 @@ export function createBusinessActions(options = {}) {
   const printOperations = new Map()
   const operationTtl = options.operationTtlMs || 10 * 60 * 1000
   const operationLimit = options.operationLimit || 100
+  const log = typeof options.log === 'function' ? options.log : () => {}
   const pruneOperations = now => {
     for (const [key, value] of printOperations) if (now - value.created >= operationTtl) printOperations.delete(key)
     while (printOperations.size >= operationLimit) printOperations.delete(printOperations.keys().next().value)
   }
-  const resolvePrintJob = (params, ctx, preview) => {
-    const value = params && params.imageAttachment ? Object.assign({}, params, { image: transfers ? transfers.consume(params.imageAttachment, ctx, preview ? 'printer_preview' : 'printer_print') : '' }) : params
+  const resolvePrintJob = (params, ctx) => {
+    const value = params && params.imageAttachment ? Object.assign({}, params, { image: transfers ? transfers.consume(params.imageAttachment, ctx, 'printer_print') : '' }) : params
     if (value && value.imageAttachment) delete value.imageAttachment
-    return printJob(value, canvasId, preview)
+    return printJob(value, canvasId)
   }
 
   const actions = {
@@ -158,8 +190,26 @@ export function createBusinessActions(options = {}) {
       if (reading) throw new ActionValidationError('称重请求正在执行', 'REQUEST_IN_PROGRESS')
       reading = true
       try {
-        const result = await adapter.scale.readWeight(timeout); hasStableWeight = !!result.stable
-        return ok({ overload: !!result.overloaded, stable: !!result.stable, weight: String(result.rawWeight ?? result.weight ?? ''), unit: result.unit || '', weightType: result.weightTypeMeaning || result.weightType || '', raw: result.rawFrame || result.raw || '' })
+        const result = await adapter.scale.readWeight(timeout)
+        const mapped = normalizeWeight(result || {})
+        const raw = result && (result.rawFrame || (typeof result.raw === 'string' ? result.raw : '')) || ''
+        hasStableWeight = !!(result && result.stable)
+        log('Scale', 'reading.map', Object.assign({
+          weightInputType: result && hasOwn(result, mapped.source) ? typeof result[mapped.source] : 'missing',
+          weightInput: result && hasOwn(result, mapped.source) ? String(result[mapped.source]) : '',
+          weight: mapped.weight,
+          weightSource: mapped.source,
+          signSource: mapped.signSource,
+          sign: result && result.sign,
+          negative: result && result.negative,
+          unit: result && result.unit || '',
+          stable: !!(result && result.stable),
+          overload: !!(result && result.overloaded),
+          weightType: result && (result.weightTypeMeaning || result.weightType) || '',
+          status: result && result.status || '',
+          signConflict: mapped.conflict,
+        }, rawSummary(raw)), mapped.conflict ? 'warn' : 'info')
+        return ok({ overload: !!(result && result.overloaded), stable: !!(result && result.stable), weight: mapped.weight, unit: result && result.unit || '', weightType: result && (result.weightTypeMeaning || result.weightType) || '', raw: String(raw) })
       } finally { reading = false }
     }),
     printer_connect: handler('printer_connect', async params => {
@@ -180,32 +230,28 @@ export function createBusinessActions(options = {}) {
     }),
     printer_print: async (params, ctx = {}) => {
       const operationId = ctx.operationId || `legacy-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+      const operationKey = `${ctx.sessionId || ''}:${ctx.generation || 0}:${operationId}`
       const now = Date.now(); pruneOperations(now)
-      if (printOperations.has(operationId)) return printOperations.get(operationId).promise
-      const task = (async () => { try { await adapter.printer.print(resolvePrintJob(params, ctx, false)); return ok({}, '打印任务已提交') } catch (e) { return failure('printer_print', e) } })()
-      printOperations.set(operationId, { created: now, promise: task })
+      if (printOperations.has(operationKey)) return printOperations.get(operationKey).promise
+      const task = (async () => { try { await adapter.printer.print(resolvePrintJob(params, ctx)); return ok({}, '打印任务已提交') } catch (e) { return failure('printer_print', e) } })()
+      printOperations.set(operationKey, { created: now, promise: task })
       return task
-    },
-    printer_preview: async (params, ctx = {}) => {
-      try {
-        const result = await adapter.printer.preview(resolvePrintJob(params, ctx, true))
-        const image = await readPreviewDataUrl(result && result.dataUrl, options.previewFileOptions)
-        if (isLargeDataUrl(image)) return ok({ image: await transfers.send(image, 'printer_preview', 'image', ctx.sessionId) })
-        return ok({ image: validateImage(image) })
-      } catch (e) { return failure('printer_preview', e) }
     },
   }
   return {
     actions,
-    async dispose() {
-      const scans = Array.from(activeScans); activeScans.clear(); hasStableWeight = false; printOperations.clear()
+    async resetSession(reason = 'session-ended') {
+      const scans = Array.from(activeScans); activeScans.clear(); hasStableWeight = false; reading = false; printOperations.clear()
       await Promise.all(scans.map(scanId => adapter.ble.stopScan(scanId).catch(() => undefined)))
-      await scanner.destroy('bridge-destroyed')
+      await scanner.destroy(reason)
+    },
+    async dispose() {
+      await this.resetSession('bridge-destroyed')
     },
   }
 }
 
 export function registerBusinessActions(bridge, options) {
   const service = createBusinessActions(options); const unregister = Object.keys(service.actions).map(name => bridge.register(name, service.actions[name]))
-  return { actions: service.actions, async dispose() { unregister.forEach(fn => fn()); await service.dispose() } }
+  return { actions: service.actions, resetSession: reason => service.resetSession(reason), async dispose() { unregister.forEach(fn => fn()); await service.dispose() } }
 }

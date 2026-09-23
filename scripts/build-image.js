@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { normalizeError, readBuildConfig } from './utils/config.js';
 import { runCommand } from './utils/process.js';
+import { createStageTimer } from './utils/timing.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -33,15 +34,18 @@ function formatBytes(bytes) {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GiB`;
 }
 
-async function main() {
-  const { apk } = await readBuildConfig();
+async function main(timer) {
+  const { apk } = await timer.stage('读取镜像配置', () => readBuildConfig());
   const image = requireImage(apk?.image);
   console.log(`[build:image] 正在构建 Android 离线镜像：${image}`);
-  await runDockerBuild(image);
-  const details = await inspectImage(image);
+  await timer.stage('Docker 镜像构建与缓存预热', () => runDockerBuild(image));
+  const details = await timer.stage('校验镜像信息', () => inspectImage(image));
   console.log(`[build:image] 构建成功：${image}`);
   console.log(`[build:image] 镜像信息：${details.id}，${details.platform}，${formatBytes(details.size)}`);
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) main().catch((error) => { console.error(`[build:image] 构建失败：${normalizeError(error).message}`); process.exitCode = 1; });
+if (isMain) {
+  const timer = createStageTimer('build:image');
+  main(timer).then(() => timer.finish(true)).catch((error) => { console.error(`[build:image] 构建失败：${normalizeError(error).message}`); timer.finish(false); process.exitCode = 1; });
+}

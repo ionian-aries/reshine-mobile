@@ -2,7 +2,7 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [key:
 export type LegacyStatus = 'success' | 'error' | 'unsupported'
 export interface LegacyEnvelope<T = Record<string, JsonValue>> { status: LegacyStatus; code: string; message: string; data: T }
 export interface BluetoothDevice { deviceId: string; name: string; localName: string; rssi: number; connected: boolean; paired: boolean }
-export interface AttachmentDescriptor { kind: 'bridge-attachment'; transferId: string; action: 'printer_print' | 'printer_preview'; field: 'image'; mime: 'image/png' | 'image/jpeg' | 'image/webp'; decodedBytes: number; sha256: string }
+export interface AttachmentDescriptor { kind: 'bridge-attachment'; transferId: string; action: 'printer_print'; field: 'image'; mime: 'image/png' | 'image/jpeg' | 'image/webp'; decodedBytes: number; sha256: string }
 export interface PrintParams { image: string; imageAttachment?: AttachmentDescriptor; width: number; height: number; orientation?: 0 | 90 | 180 | 270; threshold?: number }
 export interface PrinterPrintParams extends PrintParams { copies?: number; gapType?: 0 | 1 | 2 | 3 | 4 | 255; printDarkness?: number; printSpeed?: number }
 export interface BridgeSnapshot { state: string; ready: boolean; sessionId: string; generation: number; pending: number; queued: number; inbound: number }
@@ -35,7 +35,6 @@ export interface BusinessActionMap {
   printer_disconnect(params?: Record<string, never>): Promise<LegacyEnvelope>
   printer_status(params?: Record<string, never>): Promise<LegacyEnvelope>
   printer_print(params: PrinterPrintParams): Promise<LegacyEnvelope>
-  printer_preview(params: PrintParams): Promise<LegacyEnvelope<{ image: string | AttachmentDescriptor }>>
 }
 export const BUSINESS_CAPABILITIES: readonly (keyof BusinessActionMap)[]
 export function createBusinessActions(options: { canvasId: string; adapter?: Record<string, unknown> }): { actions: BusinessActionMap; dispose(): Promise<void> }
