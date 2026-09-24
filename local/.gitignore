@@ -6,9 +6,9 @@ m/
 src/hybrid/html/
 
 # local env files
-.env
-.env.*
-!.env.example
+# .env
+# .env.*
+# !.env.example
 
 # Log files
 npm-debug.log*

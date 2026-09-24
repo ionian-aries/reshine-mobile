@@ -29,7 +29,7 @@ yarn-error.log*
 # /config/*/secrets/*.keystore
 **/*.jks
 **/*.p12
-**/*.pfx
+**/*.pfxnpm
 
 # Android APK build outputs
 /output/
