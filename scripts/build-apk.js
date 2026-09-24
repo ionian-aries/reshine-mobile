@@ -11,7 +11,8 @@ import { chooseSingleTarget } from './utils/targets.js';
 const TEMPLATE_VERSION = '5.24.2026081301';
 const PACKAGE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/;
 const OVERRIDE_PATTERNS = [
-  /^simpleDemo\/src\/main\/res\/drawable(?:-[a-z0-9-]+)?\/(?:icon|push|splash)\.(?:png|webp)$/,
+  /^simpleDemo\/src\/main\/res\/drawable(?:-[a-z0-9-]+)?\/(?:icon|icon_foreground|push|splash)\.(?:png|webp)$/,
+  /^simpleDemo\/src\/main\/res\/drawable-anydpi-v26\/icon\.xml$/,
   /^simpleDemo\/src\/main\/res\/mipmap(?:-[a-z0-9-]+)?\/ic_launcher(?:_round)?\.(?:png|webp)$/,
   /^simpleDemo\/src\/main\/res\/values\/(?:colors|styles)\.xml$/
 ];

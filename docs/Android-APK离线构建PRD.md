@@ -100,7 +100,7 @@ reshine-mobile/
 ├── scripts/                       # 宿主编排脚本
 ├── config/<target>/
 │   ├── config.json                # 私有
-│   ├── override/                  # 可选白名单资源覆盖
+│   ├── override/                  # 可选白名单资源覆盖（含自适应图标前景与回退图标）
 │   └── secrets/                   # 私有签名材料
 └── output/<target>/{wgt,apk}/     # 发布产物
 ```
@@ -272,7 +272,7 @@ output/<target>/apk/
 
 ## 10. `override` 白名单
 
-仅允许覆盖 `simpleDemo` 下的应用图标、推送图标、启动图、launcher 图标、`colors.xml` 和 `styles.xml`。禁止覆盖 Gradle、Manifest、脚本、源码、AAR/JAR、App-plus 资源和签名配置。绝对路径、`..`、符号链接和特殊文件必须拒绝。
+仅允许覆盖 `simpleDemo` 下的应用图标、图标前景、推送图标、启动图、launcher 图标、`colors.xml` 和 `styles.xml`。应用图标使用同名 `@drawable/icon`：Android 8.0（API 26）及以上由 `drawable-anydpi-v26/icon.xml` 提供自适应图标，背景固定为模板中的白色 `icon_background`，前景使用 `drawable[-<density>]/icon_foreground.png`；旧系统回退到 `drawable[-<density>]/icon.png`。自适应前景画布为 108dp，关键图形必须位于中心 66dp 安全区域内，以兼容桌面启动器的圆形、圆角方形等蒙版。`override` 可覆盖上述 PNG/WebP 图标资源及精确路径 `drawable-anydpi-v26/icon.xml`，但不得覆盖其他 XML。禁止覆盖 Gradle、Manifest、脚本、源码、AAR/JAR、App-plus 资源和签名配置。绝对路径、`..`、符号链接和特殊文件必须拒绝。
 
 ## 11. 安全与版本控制
 
@@ -290,7 +290,7 @@ output/<target>/apk/
 1. 人工准备 `local/m` 以及两个应用各自需要的真实 `.env`，执行 `build:local-assets`，确认 `hybrid/html` 完整；构建失败时确认旧输出已删除并保留可排查的 `local/m/dist`。同时确认 online/local 的 `VUE_APP_UPGRADE_CHECK_URL` 均为各自完整 HTTPS 更新检查接口。
 2. 分别构建 online/local App-plus，确认 local 包含 H5，online 不包含 local H5。
 3. 分别构建 WGT，解包确认身份、版本和 local 静态资源完整。
-4. 构建 r6 镜像，再分别构建 APK；检查最终 Android Manifest 权限、APK 签名有效性和 App-plus 资源。
+4. 构建 r6 镜像，再分别构建 APK；检查最终 Android Manifest 权限、APK 签名有效性、App-plus 资源，以及 Android 8.0 及以上设备上自适应应用图标的完整显示。
 5. 验证 `build:image` 不触发任何前端构建。
 6. 真机验证 local 静态页面离线启动、Hash 路由、局域网 API、Bridge、扫码、蓝牙、称重和打印；验证 online WebView 地址加载。
 
