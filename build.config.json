@@ -1,0 +1,36 @@
+{
+  "apk": {
+    "image": "android-builder:5.24.2026081301-r1",
+    "hbuilderxVersion": "5.24.2026081301"
+  },
+  "targets": {
+    "online": {
+      "uniapp": {
+        "dir": "online"
+      },
+      "apk": {
+        "inputDir": "config/online"
+      },
+      "output": {
+        "wgtDir": "output/online/wgt",
+        "apkDir": "output/online/apk"
+      }
+    },
+    "local": {
+      "uniapp": {
+        "dir": "local"
+      },
+      "localAssets": {
+        "sourceDir": "local/m",
+        "outputDir": "local/src/hybrid/html"
+      },
+      "apk": {
+        "inputDir": "config/local"
+      },
+      "output": {
+        "wgtDir": "output/local/wgt",
+        "apkDir": "output/local/apk"
+      }
+    }
+  }
+}

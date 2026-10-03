@@ -1,0 +1,12 @@
+{
+    "version" : "1.0",
+    "configurations" : [
+        {
+            "customPlaygroundType" : "device",
+            "localRepoPath" : "/Users/zhuanghengheng/Works/9.9金川瑞翔/reshine-mobile/local",
+            "packageName" : "io.dcloud.HBuilder",
+            "playground" : "standard",
+            "type" : "uni-app:app-android"
+        }
+    ]
+}

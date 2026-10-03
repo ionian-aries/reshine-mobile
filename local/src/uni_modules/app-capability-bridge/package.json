@@ -1,0 +1,8 @@
+{
+  "id": "app-capability-bridge",
+  "displayName": "App Capability Bridge",
+  "version": "0.1.0",
+  "description": "Android App-vue 与受控 H5 的基础双端 RPC 桥",
+  "keywords": ["web-view", "rpc", "android"],
+  "uni_modules": { "dependencies": [], "encrypt": [], "platforms": { "App": { "app-vue": "y", "app-nvue": "n" }, "H5-mobile": { "Safari": "n", "Android Browser": "n", "微信浏览器(Android)": "n", "QQ浏览器(Android)": "n" } } }
+}

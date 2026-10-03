@@ -1,0 +1,8 @@
+.git
+node_modules
+online
+local
+config
+output
+android-old
+*.md
